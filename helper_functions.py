@@ -2,7 +2,7 @@
 # Helper functions for AGO Item Description Editor notebook
 # ======================================================================
 
-import os, re, uuid, json, math, tempfile, requests, traceback
+import os, sys, re, uuid, json, math, tempfile, requests, traceback, base64, ast
 import ipywidgets as widgets # type: ignore
 from IPython.display import display, HTML
 from pathlib import Path
@@ -11,6 +11,23 @@ from arcgis.gis import GIS
 import pandas as pd
 from html import escape
 from datetime import datetime
+from urllib.parse import urlparse
+
+# ======================================================================
+# Shared notebook runtime context configured from the notebook setup cell.
+# ======================================================================
+
+_RUNTIME_CONTEXT = None
+
+def set_runtime_context(context):
+    """Register the notebook context dictionary used by button callbacks."""
+    global _RUNTIME_CONTEXT
+    _RUNTIME_CONTEXT = context
+
+def _ctx():
+    if _RUNTIME_CONTEXT is None:
+        raise RuntimeError("Runtime context is not configured. Run setup cell first.")
+    return _RUNTIME_CONTEXT
 
 # ======================================================================
 # Environment and Paths
@@ -45,7 +62,7 @@ if current_env == "vscode":
 BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ======================================================================
-# Authentification for different environments
+# Authentication for different environments
 # ======================================================================
 
 def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=None):
@@ -60,7 +77,6 @@ def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=Non
         context["gis"] = gis
         print(f"Authenticated as: {context['gis'].properties.user.username} (role: {context['gis'].properties.user.role} / userType: {context['gis'].properties.user.userLicenseTypeId})")
         print("\nStep #1 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
-
 
     # Try ArcGIS Notebook profile
     if current_env == "arcgisnotebook":
@@ -131,9 +147,66 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
     else:
         raise ValueError("Unsupported widget_type")
     
+def setup_notebook_btn(button):
+    context = _ctx()
+    output1 = context.get("output1")
+    if output1 is None:
+        raise RuntimeError("context['output1'] is not configured.")
+
+    with output1:
+        output1.clear_output()
+        print("Setting up the notebook environment...")
+        print(f"\tPython version: {sys.version}")
+        print(f"\tArcGIS for Python API version: {arcgis.__version__}")
+        authenticate_gis(context=context)
+        if context.get("gis") is not None:
+            print("Authentication complete.")
+    
 # ======================================================================
-# Org scanning functions that avoid 10k search cap by paging through users/folders/items
+# Org scanning functions 
 # ======================================================================
+
+def parse_target_terms(raw_text):
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    return [t.strip().strip('"').strip("'") for t in text.split(",") if t.strip()]
+
+def run_primary_scan_btn(button):
+    context = _ctx()
+    output2 = context.get("output2")
+    input2 = context.get("input2")
+    if output2 is None or input2 is None:
+        raise RuntimeError("context['output2'] and context['input2'] must be configured.")
+
+    with output2:
+        output2.clear_output()
+        if context.get("gis") is None:
+            print("Please run Setup and authenticate first.")
+            return
+
+        terms = parse_target_terms(input2.value)
+        if not terms:
+            print("No search terms provided.")
+            return
+
+        print(f"Running scan with {len(terms)} term(s)...")
+        matches_df, errors_df, all_items_df = scan_org_licenseinfo_without_10k_cap(
+            context["gis"],
+            target_strings=terms,
+        )
+        context["matches_df"] = matches_df
+        context["errors_df"] = errors_df
+        context["all_items_df"] = all_items_df
+        context["TARGET_STRINGS"] = terms
+
+        print(f"Matches: {len(matches_df)} | Errors: {len(errors_df)}")
+        display(matches_df.head(20))
+
 
 def _paged_get(gis, path, params=None, records_key="items", page_size=100):
     """Generic paginator for REST endpoints that use start/num/nextStart.
@@ -274,6 +347,43 @@ def build_item_urls(gis, item_id, access):
 
     return public_url, portal_url
 
+
+def build_item_thumbnail_data_uri(gis, item_id, thumbnail_name):
+    """Fetch item thumbnail and return as a data URI; returns empty string on failure."""
+    if not thumbnail_name:
+        return ""
+
+    try:
+        rest_base = str(gis._portal.resturl).rstrip("/")
+        thumb_url = f"{rest_base}/content/items/{item_id}/info/{thumbnail_name}"
+        token = getattr(gis._con, "token", None)
+        params = {"token": token} if token else {}
+        resp = requests.get(thumb_url, params=params, timeout=20)
+        if not resp.ok:
+            return ""
+        content_type = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            return ""
+        b64 = base64.b64encode(resp.content).decode("ascii")
+        return f"data:{content_type};base64,{b64}"
+    except Exception:
+        return ""
+
+
+def build_item_thumbnail_url(review_url, item_id, thumbnail_name):
+    """Construct a thumbnail URL as fallback when inlining is unavailable."""
+    if not thumbnail_name:
+        return ""
+
+    try:
+        host = urlparse(review_url).netloc
+        scheme = urlparse(review_url).scheme or "https"
+        if not host:
+            host = "www.arcgis.com"
+        return f"{scheme}://{host}/sharing/rest/content/items/{item_id}/info/{thumbnail_name}"
+    except Exception:
+        return ""
+
 def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds=0.0, exclude_item_ids=None):
     """
     Exhaustive scan of org items (no 10k search cap) by traversing users/folders/items.
@@ -338,6 +448,7 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
                         "access": access,
                         "public_url": public_url,
                         "portal_url": portal_url,
+                        "thumbnail": item.get("thumbnail") or "",
                         "matched_terms": ", ".join(matched),
                         "licenseInfo": license_info
                     })
@@ -360,7 +471,7 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
                 "error": str(exc)
             })
     matches_df = pd.DataFrame(matches)
-    errors_df = pd.DataFrame(errors)
+    errors_df = pd.DataFrame(errors, columns=["username", "error"])
     all_items_df = pd.DataFrame({"item_id": list(all_seen)})
 
     # Add a column to matches_df that uses the public_url if available, otherwise falls back to the portal_url
@@ -369,7 +480,7 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
     else:
         matches_df = pd.DataFrame(columns=[
             "item_id","title","owner","type","access",
-            "public_url","portal_url","review_url",
+            "public_url","portal_url","review_url","thumbnail",
             "matched_terms","licenseInfo"
         ])
 
@@ -381,12 +492,209 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
 
     return matches_df, errors_df, all_items_df
 
+def run_secondary_scan_btn(button):
+    context = _ctx()
+    output4 = context.get("output4")
+    checkbox4 = context.get("checkbox4")
+    input4 = context.get("input4")
+    if output4 is None or checkbox4 is None or input4 is None:
+        raise RuntimeError("context['output4'], context['checkbox4'], and context['input4'] must be configured.")
+
+    with output4:
+        output4.clear_output()
+
+        if not checkbox4.value:
+            print("Secondary scan not run (checkbox is unchecked).")
+            return
+
+        if context.get("gis") is None:
+            print("Please run Setup and authenticate first.")
+            return
+
+        matches_df = context.get("matches_df")
+        if matches_df is not None and not matches_df.empty:
+            exclude_ids = set(matches_df["item_id"].dropna().astype(str))
+        elif Path("scan_matches.csv").exists():
+            previous_matches_df = pd.read_csv("scan_matches.csv", dtype={"item_id": str})
+            exclude_ids = set(previous_matches_df["item_id"].dropna().astype(str))
+        else:
+            exclude_ids = set()
+
+        new_terms = parse_target_terms(input4.value)
+        if not new_terms:
+            print("No new search terms provided.")
+            return
+
+        print(f"Running secondary scan with {len(new_terms)} term(s)...")
+        new_matches_df, new_errors_df, new_all_items_df = scan_org_licenseinfo_without_10k_cap(
+            context["gis"],
+            target_strings=new_terms,
+            exclude_item_ids=exclude_ids,
+        )
+
+        if not new_matches_df.empty and exclude_ids:
+            new_matches_df = new_matches_df[~new_matches_df["item_id"].isin(exclude_ids)].copy()
+
+        new_matches_df.to_csv("secondary_scan_matches.csv", index=False)
+
+        context["new_matches_df"] = new_matches_df
+        context["new_errors_df"] = new_errors_df
+        context["new_all_items_df"] = new_all_items_df
+
+        print(f"New matches: {len(new_matches_df)} | Errors: {len(new_errors_df)}")
+        display(new_matches_df.head(20))
+
+# =====================================================================
+# File handling
+# =====================================================================
+
+def save_scan_outputs_btn(button):
+    context = _ctx()
+    output3 = context.get("output3")
+    if output3 is None:
+        raise RuntimeError("context['output3'] is not configured.")
+
+    with output3:
+        output3.clear_output()
+        matches_df = context.get("matches_df")
+        errors_df = context.get("errors_df")
+        all_items_df = context.get("all_items_df")
+        if matches_df is None or errors_df is None or all_items_df is None:
+            print("Run the scan first so matches/errors/all_items data exists.")
+            return
+        matches_df.to_csv("scan_matches.csv", index=False)
+        errors_df.to_csv("scan_errors.csv", index=False)
+        all_items_df.to_csv("scan_all_items.csv", index=False)
+        print("Saved: scan_matches.csv, scan_errors.csv, and scan_all_items.csv")
+
+def export_dry_run_btn(_button):
+    context = _ctx()
+    output7 = context.get("output7")
+    if output7 is None:
+        raise RuntimeError("context['output7'] is not configured.")
+
+    with output7:
+        output7.clear_output()
+        plan_df = context.get("plan_df")
+        if plan_df is None:
+            print("Build the dry run first so plan_df exists.")
+            return
+
+        plan_df.to_csv("ToU_update_plan_dry_run.csv", index=False)
+        print("Saved: ToU_update_plan_dry_run.csv")
+
+def create_report_btn(_button):
+    context = _ctx()
+    output8 = context.get("output8")
+    if output8 is None:
+        raise RuntimeError("context['output8'] is not configured.")
+
+    with output8:
+        output8.clear_output()
+        plan_df = context.get("plan_df")
+        if plan_df is None:
+            print("Build the dry run first so plan_df exists.")
+            return
+
+        report_path = build_side_by_side_report(
+            plan_df,
+            out_html="ToU_side_by_side_report.html",
+            only_updates=True,
+            max_rows=200,
+            gis=context.get("gis"),
+            selection_out_json="selected_item_ids.json",
+        )
+        context["report_path"] = report_path
+        print(f"Saved: {report_path}")
+        print("In the report, choose rows via checkboxes and click 'Download selected IDs (JSON)'.")
+        print("Then move/copy that file into this notebook working folder before running Cell 9.")
+
+def export_final_results_btn(_button):
+    context = _ctx()
+    output10 = context.get("output10")
+    if output10 is None:
+        raise RuntimeError("context['output10'] is not configured.")
+
+    with output10:
+        output10.clear_output()
+        success_df = context.get("success_df")
+        update_errors_df = context.get("update_errors_df")
+        if success_df is None or update_errors_df is None:
+            print("Run Apply updates first so success_df and update_errors_df exist.")
+            return
+
+        success_df.to_csv("update_ToU_successes.csv", index=False)
+        update_errors_df.to_csv("update_ToU_errors.csv", index=False)
+        print("Saved: update_ToU_successes.csv and update_ToU_errors.csv")
+
+# =====================================================================
+# Strict match filter
+# =====================================================================
+
+def run_strict_match_filter_btn(_button):
+    context = _ctx()
+    output5 = context.get("output5")
+    exact_term_input = context.get("exact_term_input")
+    if output5 is None or exact_term_input is None:
+        raise RuntimeError("context['output5'] and context['exact_term_input'] must be configured.")
+
+    with output5:
+        output5.clear_output()
+        matches_df = context.get("matches_df")
+        if matches_df is None:
+            print("Run the scan first so matches_df exists.")
+            return
+
+        exact_term = (exact_term_input.value or "").strip()
+        if not exact_term:
+            print("Enter an exact term to filter on.")
+            return
+
+        exact_url_df = matches_df[
+            matches_df["matched_terms"].str.contains(
+                exact_term,
+                case=False,
+                na=False,
+            )
+        ].copy()
+        context["exact_url_df"] = exact_url_df
+
+        print(f"Number of items with exact matches: {len(exact_url_df)}")
+        display(exact_url_df.head(50))
+
 # =====================================================================
 # Dry run functions
 # =====================================================================
 
-# Load canonical replacement block
-OFFICIAL_TOU_HTML = Path("AGSM_Esri_ToU_official.html").read_text(encoding="utf-8").strip()
+def dry_run_btn(_button):
+    context = _ctx()
+    output6 = context.get("output6")
+    if output6 is None:
+        raise RuntimeError("context['output6'] is not configured.")
+
+    with output6:
+        output6.clear_output()
+        matches_df = context.get("matches_df")
+        if matches_df is None:
+            print("Run the scan first so matches_df exists.")
+            return
+
+        tou_path = context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE)
+        replacement_tou = load_official_tou_html(tou_path)
+        plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou)
+        dry_run_table = show_dry_run(plan_df, max_rows=200)
+        context["plan_df"] = plan_df
+        context["dry_run_table"] = dry_run_table
+        display(dry_run_table)
+
+# Canonical replacement block source file (overridable from notebook UI).
+OFFICIAL_TOU_HTML_FILE = "/Users/davi6569/Documents/GitHub/AGO-item-description-editor/Esri_ToU.html"
+
+
+def load_official_tou_html(file_path=None):
+    """Load canonical ToU HTML text from a file path."""
+    path = Path(file_path or OFFICIAL_TOU_HTML_FILE)
+    return path.read_text(encoding="utf-8").strip()
 
 # Optional: small direct text/url cleanups as a fallback. Replace the defunct image URL with the approved image URL.
 # Add other pairs as needed {target text : replacement text}, but be cautious as this is a blunt replacement that replaces every instance of the target text.
@@ -454,17 +762,18 @@ TRAILING_EMPTY_WRAPPER_RE = re.compile(
     """
 )
 # If the canonical block is wrapped only by generic formatting junk, unwrap it and preserve the true surrounding content.
-AROUND_CANONICAL_JUNK_RE = re.compile(
-    rf"""(?isx)
-    (?P<before>
-        (?:<span\b[^>]*>|<div\b[^>]*>|<p\b[^>]*>|\s|&nbsp;|<br\s*/?>)*
+def _build_around_canonical_junk_re(official_html: str):
+    return re.compile(
+        rf"""(?isx)
+        (?P<before>
+            (?:<span\b[^>]*>|<div\b[^>]*>|<p\b[^>]*>|\s|&nbsp;|<br\s*/?>)*
+        )
+        (?P<canon>{re.escape(official_html)})
+        (?P<after>
+            (?:</span>|</div>|</p>|\s|&nbsp;|<br\s*/?>)*
+        )
+        """
     )
-    (?P<canon>{re.escape(OFFICIAL_TOU_HTML)})
-    (?P<after>
-        (?:</span>|</div>|</p>|\s|&nbsp;|<br\s*/?>)*
-    )
-    """
-)
 
 def cleanup_after_replacement(html_text: str, official_html: str) -> str:
     """Clean up the HTML after replacement to preserve surrounding content and formatting as much as possible.
@@ -485,7 +794,8 @@ def cleanup_after_replacement(html_text: str, official_html: str) -> str:
 
     # If the canonical block is wrapped only by generic formatting junk,
     # unwrap it and preserve the true surrounding content.
-    html_text = AROUND_CANONICAL_JUNK_RE.sub(official_html, html_text, count=1)
+    around_canonical_junk_re = _build_around_canonical_junk_re(official_html)
+    html_text = around_canonical_junk_re.sub(official_html, html_text, count=1)
 
     # Clean a few common leftovers from observed outputs
     html_text = re.sub(r"(?is)</p>\s*</p>", "</p>", html_text)
@@ -545,6 +855,7 @@ def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=1
             "owner": row.get("owner"),
             "type": row.get("type"),
             "review_url": row.get("review_url"),
+            "thumbnail": row.get("thumbnail") or "",
             "matched_terms": row.get("matched_terms"),
             "replacements_found": replacements_found,
             "will_update": will_update,
@@ -585,130 +896,256 @@ def build_side_by_side_report(
     plan_df,
     out_html="tou_side_by_side_report.html",
     only_updates=True,
-    max_rows=200
+    max_rows=200,
+    gis=None,
+    selection_out_json="selected_item_ids.json"
 ):
-    """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates.
-    
-    PARAMS
-    plan_df: DataFrame with columns for item_id, title, owner, type, matched_terms, replacements_found, will_update, old_preview, new_preview, old_licenseInfo, new_licenseInfo
-    out_html: output HTML file path (default "tou_side_by_side_report.html")
-    only_updates: if True, include only rows that will be updated (default True)
-    max_rows: maximum number of rows to include in the report (default 200)
+        """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates."""
+        df = plan_df.copy()
 
-    RETURNS
-    out_html: the file path of the generated HTML report
-    """    
-    df = plan_df.copy()
+        if only_updates:
+                df = df[df["will_update"] == True]
 
-    if only_updates:
-        df = df[df["will_update"] == True]
+        if max_rows is not None:
+                df = df.head(max_rows)
 
-    if max_rows is not None:
-        df = df.head(max_rows)
+        def safe_text(v):
+                return "" if v is None else str(v)
 
-    def safe_text(v):
-        """ Convert a value to a string for HTML display, treating None as an empty string.
-        This ensures that missing values don't show up as 'None' in the report.
-        
-        PARAMS
-        v: the value to convert to string
+        rows_html = []
+        for _, r in df.iterrows():
+                item_id = safe_text(r.get("item_id"))
+                title = safe_text(r.get("title"))
+                owner = safe_text(r.get("owner"))
+                item_type = safe_text(r.get("type"))
+                review_url = safe_text(r.get("review_url"))
+                thumbnail_name = safe_text(r.get("thumbnail"))
+                matched_terms = safe_text(r.get("matched_terms"))
+                repl = safe_text(r.get("replacements_found"))
+                old_html = safe_text(r.get("old_licenseInfo"))
+                new_html = safe_text(r.get("new_licenseInfo"))
+                old_srcdoc = escape(old_html, quote=True)
+                new_srcdoc = escape(new_html, quote=True)
 
-        RETURNS
-        str: the converted string value
+                thumbnail_data_uri = ""
+                thumbnail_url = ""
+                if gis is not None:
+                        thumbnail_data_uri = build_item_thumbnail_data_uri(gis, item_id, thumbnail_name)
+                if not thumbnail_data_uri:
+                        thumbnail_url = build_item_thumbnail_url(review_url, item_id, thumbnail_name)
+
+                thumb_html = ""
+                if thumbnail_data_uri:
+                        thumb_html = f'<img class="thumb" src="{escape(thumbnail_data_uri)}" alt="thumbnail" />'
+                elif thumbnail_url:
+                        thumb_html = f'<img class="thumb" src="{escape(thumbnail_url)}" alt="thumbnail" />'
+
+                rows_html.append(f"""
+                <tr>
+                    <td class="meta">
+                        <div class="thumb-wrap">{thumb_html}</div>
+                        <div><strong>Item:</strong> {escape(item_id)}</div>
+                        <div><strong>Title:</strong> {escape(title)}</div>
+                        <div><strong>Owner:</strong> {escape(owner)}</div>
+                        <div><strong>Type:</strong> {escape(item_type)}</div>
+                        <div><strong>Matched:</strong> {escape(matched_terms)}</div>
+                        <div><strong>Replacements:</strong> {escape(repl)}</div>
+                        <div><a href="{escape(review_url)}" target="_blank">Open item</a></div>
+                    </td>
+                    <td>
+                        <iframe class="pane" sandbox srcdoc="{old_srcdoc}"></iframe>
+                        <details><summary>Old source</summary><pre>{escape(old_html)}</pre></details>
+                    </td>
+                    <td class="select-cell">
+                        <input type="checkbox" class="row-check" data-item-id="{escape(item_id)}" checked>
+                    </td>
+                    <td>
+                        <iframe class="pane" sandbox srcdoc="{new_srcdoc}"></iframe>
+                        <details><summary>New source</summary><pre>{escape(new_html)}</pre></details>
+                    </td>
+                </tr>
+                """)
+
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        page = f"""
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8" />
+            <title>LicenseInfo Old vs New</title>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }}
+                h1 {{ margin: 0 0 8px 0; }}
+                .note {{ color: #555; margin-bottom: 12px; }}
+                table {{ width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }}
+                th, td {{ border: 1px solid #ddd; vertical-align: top; padding: 8px; }}
+                thead th {{ background: #f7f7f7; position: sticky; top: 0; z-index: 3; }}
+                .meta {{ width: 25%; font-size: 13px; line-height: 1.4; position: sticky; left: 0; background: #fff; z-index: 2; }}
+                .select-cell {{ width: 85px; text-align: center; position: sticky; left: 25%; background: #fff; z-index: 2; }}
+                .select-head {{ width: 85px; text-align: center; position: sticky; left: 25%; z-index: 4; }}
+                .thumb-wrap {{ margin-bottom: 8px; }}
+                .thumb {{ width: 88px; height: 56px; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; }}
+                .pane {{ width: 100%; height: 220px; border: 1px solid #ccc; background: white; }}
+                pre {{ white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }}
+                details {{ margin-top: 6px; }}
+                .actions {{ display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }}
+                .actions button {{ padding: 6px 10px; border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; cursor: pointer; }}
+                .wrap {{ overflow: auto; max-height: calc(100vh - 180px); border: 1px solid #ddd; }}
+            </style>
+        </head>
+        <body>
+            <h1>LicenseInfo Side-by-Side Review</h1>
+            <div class="note">Generated: {escape(ts)} | Rows: {len(df)} | only_updates={only_updates}</div>
+            <div class="actions">
+                <button type="button" onclick="downloadSelectedIdsJson()">Download selected IDs (JSON)</button>
+                <button type="button" onclick="downloadSelectedIdsCsv()">Download selected IDs (CSV)</button>
+                <span id="selectedCount">Selected: 0</span>
+            </div>
+            <div class="wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Old</th>
+                            <th class="select-head"><input type="checkbox" id="toggleAll" checked></th>
+                            <th>New</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(rows_html)}
+                    </tbody>
+                </table>
+            </div>
+            <script>
+                const CHECK_CLASS = '.row-check';
+                const toggleAllEl = document.getElementById('toggleAll');
+                const countEl = document.getElementById('selectedCount');
+
+                function getSelectedIds() {{
+                    return Array.from(document.querySelectorAll(CHECK_CLASS))
+                        .filter(cb => cb.checked)
+                        .map(cb => cb.dataset.itemId);
+                }}
+
+                function updateSelectedCount() {{
+                    const selected = getSelectedIds();
+                    countEl.textContent = 'Selected: ' + selected.length;
+                }}
+
+                function syncToggleState() {{
+                    const checks = Array.from(document.querySelectorAll(CHECK_CLASS));
+                    const checkedCount = checks.filter(cb => cb.checked).length;
+                    if (checkedCount === 0) {{
+                        toggleAllEl.checked = false;
+                        toggleAllEl.indeterminate = false;
+                    }} else if (checkedCount === checks.length) {{
+                        toggleAllEl.checked = true;
+                        toggleAllEl.indeterminate = false;
+                    }} else {{
+                        toggleAllEl.indeterminate = true;
+                    }}
+                    updateSelectedCount();
+                }}
+
+                function triggerDownload(filename, content, mimeType) {{
+                    const blob = new Blob([content], {{ type: mimeType }});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                }}
+
+                function downloadSelectedIdsJson() {{
+                    const selected = getSelectedIds();
+                    triggerDownload('{escape(selection_out_json)}', JSON.stringify(selected, null, 2), 'application/json');
+                }}
+
+                function downloadSelectedIdsCsv() {{
+                    const selected = getSelectedIds();
+                    const csv = ['item_id', ...selected].join('\\n');
+                    triggerDownload('selected_item_ids.csv', csv, 'text/csv;charset=utf-8');
+                }}
+
+                toggleAllEl.addEventListener('change', () => {{
+                    document.querySelectorAll(CHECK_CLASS).forEach(cb => cb.checked = toggleAllEl.checked);
+                    syncToggleState();
+                }});
+
+                document.querySelectorAll(CHECK_CLASS).forEach(cb => {{
+                    cb.addEventListener('change', syncToggleState);
+                }});
+
+                syncToggleState();
+            </script>
+        </body>
+        </html>
         """
-        return "" if v is None else str(v)
 
-    rows_html = []
-    # Iterate over the DataFrame rows and build HTML for each item, showing metadata and old/new licenseInfo side by side with iframes and details blocks for full text.
-    for _, r in df.iterrows():
-        item_id = safe_text(r.get("item_id"))
-        title = safe_text(r.get("title"))
-        owner = safe_text(r.get("owner"))
-        item_type = safe_text(r.get("type"))
-        review_url = safe_text(r.get("review_url"))
-        matched_terms = safe_text(r.get("matched_terms"))
-        repl = safe_text(r.get("replacements_found"))
-        old_html = safe_text(r.get("old_licenseInfo"))
-        new_html = safe_text(r.get("new_licenseInfo"))
-        old_srcdoc = escape(old_html, quote=True)
-        new_srcdoc = escape(new_html, quote=True)
-        # Build a table row for this item with metadata in the first column, old licenseInfo in the second column, and new licenseInfo in the third column. 
-        # Use iframes to show the old/new licenseInfo side by side, and an expandable details block to show the full HTML source for each.
-        rows_html.append(f"""
-        <tr>
-          <td class="meta">
-            <div><strong>Item:</strong> {escape(item_id)}</div>
-            <div><strong>Title:</strong> {escape(title)}</div>
-            <div><strong>Owner:</strong> {escape(owner)}</div>
-            <div><strong>Type:</strong> {escape(item_type)}</div>
-            <div><strong>Matched:</strong> {escape(matched_terms)}</div>
-            <div><strong>Replacements:</strong> {escape(repl)}</div>
-            <div><a href="{escape(review_url)}" target="_blank">Open item</a></div>
-          </td>
-          <td>
-            <iframe class="pane" sandbox srcdoc="{old_srcdoc}"></iframe>
-            <details><summary>Old source</summary><pre>{escape(old_html)}</pre></details>
-          </td>
-          <td>
-            <iframe class="pane" sandbox srcdoc="{new_srcdoc}"></iframe>
-            <details><summary>New source</summary><pre>{escape(new_html)}</pre></details>
-          </td>
-        </tr>
-        """)
-    # Create a date-time stamp for when the report was generated
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Build the full HTML page with a table containing all the rows, and include some basic styling for readability.
-    page = f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>LicenseInfo Old vs New</title>
-      <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }}
-        h1 {{ margin: 0 0 8px 0; }}
-        .note {{ color: #555; margin-bottom: 12px; }}
-        table {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
-        th, td {{ border: 1px solid #ddd; vertical-align: top; padding: 8px; }}
-        th {{ background: #f7f7f7; position: sticky; top: 0; z-index: 1; }}
-        .meta {{ width: 25%; font-size: 13px; line-height: 1.4; }}
-        .pane {{ width: 100%; height: 220px; border: 1px solid #ccc; background: white; }}
-        pre {{ white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }}
-        details {{ margin-top: 6px; }}
-        .wrap {{ overflow-x: auto; }}
-      </style>
-    </head>
-    <body>
-      <h1>LicenseInfo Side-by-Side Review</h1>
-      <div class="note">Generated: {escape(ts)} | Rows: {len(df)} | only_updates={only_updates}</div>
-      <div class="wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th>Old</th>
-              <th>New</th>
-            </tr>
-          </thead>
-          <tbody>
-            {''.join(rows_html)}
-          </tbody>
-        </table>
-      </div>
-    </body>
-    </html>
-    """
-
-    Path(out_html).write_text(page, encoding="utf-8")
-    print(f"Wrote report: {out_html}")
-    return out_html
+        Path(out_html).write_text(page, encoding="utf-8")
+        print(f"Wrote report: {out_html}")
+        return out_html
 
 # =====================================================================
 # Update function
 # =====================================================================
 
+def apply_updates_btn(_button):
+    context = _ctx()
+    output9 = context.get("output9")
+    selected_ids_path = context.get("selected_ids_path")
+    if output9 is None or selected_ids_path is None:
+        raise RuntimeError("context['output9'] and context['selected_ids_path'] must be configured.")
+
+    with output9:
+        output9.clear_output()
+        if context.get("gis") is None:
+            print("Run Setup and authenticate first.")
+            return
+
+        plan_df = context.get("plan_df")
+        if plan_df is None:
+            print("Build the dry run first so plan_df exists.")
+            return
+
+        selected_item_ids = None
+        selected_path = (selected_ids_path.value or "").strip()
+        if selected_path and Path(selected_path).exists():
+            try:
+                if selected_path.lower().endswith(".json"):
+                    selected_item_ids = json.loads(Path(selected_path).read_text(encoding="utf-8"))
+                elif selected_path.lower().endswith(".csv"):
+                    selected_df = pd.read_csv(selected_path, dtype=str)
+                    if "item_id" in selected_df.columns:
+                        selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
+                if selected_item_ids is not None:
+                    print(f"Loaded selected IDs: {len(selected_item_ids)}")
+            except Exception as exc:
+                print(f"Could not load selected IDs file ({selected_path}): {exc}")
+                print("Proceeding without selection filter.")
+                selected_item_ids = None
+        else:
+            print("No selected IDs file found. Applying to all rows where will_update=True.")
+
+        success_df, update_errors_df = apply_licenseinfo_updates(
+            context["gis"],
+            plan_df,
+            require_phrase="APPLY UPDATES",
+            pause_seconds=0.0,
+            selected_item_ids=selected_item_ids,
+        )
+        context["success_df"] = success_df
+        context["update_errors_df"] = update_errors_df
+        if not success_df.empty:
+            display(success_df.head(20))
+        else:
+            print("No successful updates to display.")
+
 # Function to apply the updates to AGO items. Accidental execution of this function is protected by a required input phrase "APPLY UPDATES"
-def apply_licenseinfo_updates(gis, plan_df, require_phrase="APPLY UPDATES", pause_seconds=0.0):
+def apply_licenseinfo_updates(gis, plan_df, require_phrase="APPLY UPDATES", pause_seconds=0.0, selected_item_ids=None):
     """
     Apply updates to AGO items, but only after explicit confirmation input.
 
@@ -723,6 +1160,11 @@ def apply_licenseinfo_updates(gis, plan_df, require_phrase="APPLY UPDATES", paus
     errors_df: DataFrame of any errors encountered during updates with columns for item_id, title, and error message
     """
     to_update = plan_df[plan_df["will_update"] == True].copy()
+
+    if selected_item_ids is not None:
+        selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
+        to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
+        print(f"Selection filter applied. Rows selected for update: {len(to_update)}")
 
     if to_update.empty:
         print("Nothing to update.")
