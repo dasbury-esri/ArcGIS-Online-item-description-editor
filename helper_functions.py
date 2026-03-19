@@ -2,7 +2,7 @@
 # Helper functions for AGO Item Description Editor notebook
 # ======================================================================
 
-import os, sys, re, uuid, json, math, tempfile, requests, traceback, base64, ast
+import os, sys, re, uuid, json, math, tempfile, requests, traceback, base64, ast, csv, io
 import ipywidgets as widgets # type: ignore
 from IPython.display import display, HTML
 from pathlib import Path
@@ -131,9 +131,23 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
     if widget_type == "button":
         return widgets.Button(description=description, layout=layout)
     elif widget_type == "checkbox":
-        return widgets.Checkbox(value=value if value is not None else False, description=description, layout=layout)
+        # Checkboxes with long descriptions should not be constrained to narrow fixed widths.
+        checkbox_layout = layout
+        if checkbox_layout.width in (None, "", "200px"):
+            checkbox_layout = widgets.Layout(width="auto", height=height)
+        return widgets.Checkbox(
+            value=value if value is not None else False, 
+            description=description, 
+            layout=checkbox_layout,
+            style={"description_width": "initial"})
     elif widget_type == "text":
-        return widgets.Text(value=value if value is not None else "", placeholder=placeholder if placeholder is not None else "", description=description, layout=layout)
+        return widgets.Text(
+            value=value if value is not None else "", 
+            placeholder=placeholder if placeholder is not None else "", 
+            description=description, 
+            layout=layout,
+            style={"description_width": "initial"}
+        )
     elif widget_type == "label":
         return widgets.Label(value=value if value is not None else "", layout=layout)
     elif widget_type == "output":
@@ -143,7 +157,13 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
         return widgets.HBox(elements if elements else [])
     elif widget_type == "textarea":
     # Support multi-line input
-        return widgets.Textarea(value=value or "", description=description or "", placeholder=placeholder or "", layout=layout)
+        return widgets.Textarea(
+            value=value or "",
+            description=description or "",
+            placeholder=placeholder or "",
+            layout=layout,
+            style={"description_width": "initial"},
+        )
     else:
         raise ValueError("Unsupported widget_type")
     
@@ -170,11 +190,31 @@ def parse_target_terms(raw_text):
     text = (raw_text or "").strip()
     if not text:
         return []
+
+    # Backward compatibility: accept legacy Python-list input format.
     if text.startswith("[") and text.endswith("]"):
-        parsed = ast.literal_eval(text)
-        if isinstance(parsed, list):
-            return [str(x).strip() for x in parsed if str(x).strip()]
-    return [t.strip().strip('"').strip("'") for t in text.split(",") if t.strip()]
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+        except Exception:
+            pass
+
+    # Preferred format: CSV-like text. Terms with spaces can be wrapped in double quotes.
+    # Example: foo, "bar baz", https://example.com
+    terms = []
+    reader = csv.reader(io.StringIO(text), skipinitialspace=True)
+    for row in reader:
+        for value in row:
+            cleaned = str(value).strip()
+            if cleaned:
+                terms.append(cleaned)
+    return terms
+
+
+def normalize_target_terms_text(terms):
+    """Return a canonical string form like ["term1", "term2"]."""
+    return json.dumps(list(terms), ensure_ascii=False)
 
 def run_primary_scan_btn(button):
     context = _ctx()
@@ -194,6 +234,8 @@ def run_primary_scan_btn(button):
             print("No search terms provided.")
             return
 
+        input2.value = normalize_target_terms_text(terms)
+
         print(f"Running scan with {len(terms)} term(s)...")
         matches_df, errors_df, all_items_df = scan_org_licenseinfo_without_10k_cap(
             context["gis"],
@@ -205,7 +247,8 @@ def run_primary_scan_btn(button):
         context["TARGET_STRINGS"] = terms
 
         print(f"Matches: {len(matches_df)} | Errors: {len(errors_df)}")
-        display(matches_df.head(20))
+        print("First 3 sample matches:")
+        display(matches_df.head(3))
 
 
 def _paged_get(gis, path, params=None, records_key="items", page_size=100):
@@ -484,27 +527,26 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
             "matched_terms","licenseInfo"
         ])
 
-    print(f"Done. Unique items seen: {len(all_seen)}")
-    print(f"Excluded from matching: {total_skipped_excluded}")
-    print(f"Scanned after exclusions: {total_scanned}")
-    print(f"Matches found: {len(matches_df)}")
-    print(f"User-level errors: {len(errors_df)}")
+    print(f"\n*** Done! ***")
+    print(f"Number of unique items found: {len(all_seen)}")
+    print(f"Number of items excluded (from previous run): {total_skipped_excluded}")
+    print(f"Number of items scanned: {total_scanned}")
 
     return matches_df, errors_df, all_items_df
 
 def run_secondary_scan_btn(button):
     context = _ctx()
-    output4 = context.get("output4")
-    checkbox4 = context.get("checkbox4")
-    input4 = context.get("input4")
-    if output4 is None or checkbox4 is None or input4 is None:
-        raise RuntimeError("context['output4'], context['checkbox4'], and context['input4'] must be configured.")
+    output5 = context.get("output5")
+    checkbox5 = context.get("checkbox5")
+    input5 = context.get("input5")
+    if output5 is None or checkbox5 is None or input5 is None:
+        raise RuntimeError("context['output5'], context['checkbox5'], and context['input5'] must be configured.")
 
-    with output4:
-        output4.clear_output()
+    with output5:
+        output5.clear_output()
 
-        if not checkbox4.value:
-            print("Secondary scan not run (checkbox is unchecked).")
+        if not checkbox5.value:
+            print("Secondary scan not run (check box above to enable)")
             return
 
         if context.get("gis") is None:
@@ -520,10 +562,12 @@ def run_secondary_scan_btn(button):
         else:
             exclude_ids = set()
 
-        new_terms = parse_target_terms(input4.value)
+        new_terms = parse_target_terms(input5.value)
         if not new_terms:
             print("No new search terms provided.")
             return
+
+        input5.value = normalize_target_terms_text(new_terms)
 
         print(f"Running secondary scan with {len(new_terms)} term(s)...")
         new_matches_df, new_errors_df, new_all_items_df = scan_org_licenseinfo_without_10k_cap(
@@ -560,7 +604,7 @@ def save_scan_outputs_btn(button):
         errors_df = context.get("errors_df")
         all_items_df = context.get("all_items_df")
         if matches_df is None or errors_df is None or all_items_df is None:
-            print("Run the scan first so matches/errors/all_items data exists.")
+            print("Run the scan first, or upload a saved run so scan data exists.")
             return
         matches_df.to_csv("scan_matches.csv", index=False)
         errors_df.to_csv("scan_errors.csv", index=False)
@@ -568,22 +612,6 @@ def save_scan_outputs_btn(button):
         print("Saved: scan_matches.csv, scan_errors.csv, and scan_all_items.csv")
 
 def export_dry_run_btn(_button):
-    context = _ctx()
-    output7 = context.get("output7")
-    if output7 is None:
-        raise RuntimeError("context['output7'] is not configured.")
-
-    with output7:
-        output7.clear_output()
-        plan_df = context.get("plan_df")
-        if plan_df is None:
-            print("Build the dry run first so plan_df exists.")
-            return
-
-        plan_df.to_csv("ToU_update_plan_dry_run.csv", index=False)
-        print("Saved: ToU_update_plan_dry_run.csv")
-
-def create_report_btn(_button):
     context = _ctx()
     output8 = context.get("output8")
     if output8 is None:
@@ -596,36 +624,61 @@ def create_report_btn(_button):
             print("Build the dry run first so plan_df exists.")
             return
 
+        input8_csv_name = context.get("input8_csv_name")
+        csv_name = "dry_run_results.csv"
+        if input8_csv_name is not None:
+            entered = (input8_csv_name.value or "").strip()
+            if entered:
+                csv_name = entered
+        if not csv_name.lower().endswith(".csv"):
+            csv_name = f"{csv_name}.csv"
+
+        plan_df.to_csv(csv_name, index=False)
+        print(f"Saved: {csv_name}")
+
+def create_report_btn(_button):
+    context = _ctx()
+    output9 = context.get("output9")
+    if output9 is None:
+        raise RuntimeError("context['output9'] is not configured.")
+
+    with output9:
+        output9.clear_output()
+        plan_df = context.get("plan_df")
+        if plan_df is None:
+            print("Build the dry run first before creating the report.")
+            return
+
         report_path = build_side_by_side_report(
             plan_df,
-            out_html="ToU_side_by_side_report.html",
+            report_output_path="dry_run_report.html",
             only_updates=True,
-            max_rows=200,
             gis=context.get("gis"),
             selection_out_json="selected_item_ids.json",
         )
         context["report_path"] = report_path
-        print(f"Saved: {report_path}")
-        print("In the report, choose rows via checkboxes and click 'Download selected IDs (JSON)'.")
-        print("Then move/copy that file into this notebook working folder before running Cell 9.")
+        print(f"Wrote report and saved to: {report_path}")
+        print(f"\nWhen running in ArcGIS Online, open the files tab and click the file name to download. Then open the file in your browser.")
+        print("\nOn the report webpage, choose rows via checkboxes and click 'Download selected Item IDs (JSON)'.")
+        print("Then upload/copy that file into this notebook's working folder before running Cell 9.")
 
 def export_final_results_btn(_button):
     context = _ctx()
-    output10 = context.get("output10")
-    if output10 is None:
-        raise RuntimeError("context['output10'] is not configured.")
+    output11 = context.get("output11")
+    if output11 is None:
+        raise RuntimeError("context['output11'] is not configured.")
 
-    with output10:
-        output10.clear_output()
+    with output11:
+        output11.clear_output()
         success_df = context.get("success_df")
         update_errors_df = context.get("update_errors_df")
         if success_df is None or update_errors_df is None:
-            print("Run Apply updates first so success_df and update_errors_df exist.")
+            print("Run Apply updates first to create the output.")
             return
 
-        success_df.to_csv("update_ToU_successes.csv", index=False)
-        update_errors_df.to_csv("update_ToU_errors.csv", index=False)
-        print("Saved: update_ToU_successes.csv and update_ToU_errors.csv")
+        success_df.to_csv("update_successes.csv", index=False)
+        update_errors_df.to_csv("update_errors.csv", index=False)
+        print("Saved: update_successes.csv and update_errors.csv")
 
 # =====================================================================
 # Strict match filter
@@ -633,19 +686,19 @@ def export_final_results_btn(_button):
 
 def run_strict_match_filter_btn(_button):
     context = _ctx()
-    output5 = context.get("output5")
-    exact_term_input = context.get("exact_term_input")
-    if output5 is None or exact_term_input is None:
-        raise RuntimeError("context['output5'] and context['exact_term_input'] must be configured.")
+    output6 = context.get("output6")
+    input6 = context.get("input6")
+    if output6 is None or input6 is None:
+        raise RuntimeError("context['output6'] and context['input6'] must be configured.")
 
-    with output5:
-        output5.clear_output()
+    with output6:
+        output6.clear_output()
         matches_df = context.get("matches_df")
         if matches_df is None:
             print("Run the scan first so matches_df exists.")
             return
 
-        exact_term = (exact_term_input.value or "").strip()
+        exact_term = (input6.value or "").strip()
         if not exact_term:
             print("Enter an exact term to filter on.")
             return
@@ -668,12 +721,12 @@ def run_strict_match_filter_btn(_button):
 
 def dry_run_btn(_button):
     context = _ctx()
-    output6 = context.get("output6")
-    if output6 is None:
-        raise RuntimeError("context['output6'] is not configured.")
+    output7 = context.get("output7")
+    if output7 is None:
+        raise RuntimeError("context['output7'] is not configured.")
 
-    with output6:
-        output6.clear_output()
+    with output7:
+        output7.clear_output()
         matches_df = context.get("matches_df")
         if matches_df is None:
             print("Run the scan first so matches_df exists.")
@@ -685,7 +738,8 @@ def dry_run_btn(_button):
         dry_run_table = show_dry_run(plan_df, max_rows=200)
         context["plan_df"] = plan_df
         context["dry_run_table"] = dry_run_table
-        display(dry_run_table)
+        print("Preview of first 3 rows")
+        display(dry_run_table[:3])
 
 # Canonical replacement block source file (overridable from notebook UI).
 OFFICIAL_TOU_HTML_FILE = "/Users/davi6569/Documents/GitHub/AGO-item-description-editor/Esri_ToU.html"
@@ -894,20 +948,27 @@ def show_dry_run(plan_df, max_rows=50):
 # Helper function to build a side-by-side HTML report for old vs new ToU for review before actual updates.
 def build_side_by_side_report(
     plan_df,
-    out_html="tou_side_by_side_report.html",
+    report_output_path="dry_run_report.html",
     only_updates=True,
-    max_rows=200,
     gis=None,
     selection_out_json="selected_item_ids.json"
 ):
-        """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates."""
+        """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates.
+        
+        PARAMS
+        plan_df: DataFrame with x columns
+        report_output_path: filename for the output HTML report (default "dry_run_report.html")
+        only_updates: if True, include only rows where will_update is True (default True)
+        gis: optional authenticated GIS object, used to fetch thumbnails as data URIs for inlining; if not provided, thumbnail URLs will be constructed but may not display if authentication is required
+        selection_out_json: filename for the output JSON file that will contain the list of selected item IDs
+
+        RETURNS
+        report_path: the file path to the generated HTML report
+        """
         df = plan_df.copy()
 
         if only_updates:
                 df = df[df["will_update"] == True]
-
-        if max_rows is not None:
-                df = df.head(max_rows)
 
         def safe_text(v):
                 return "" if v is None else str(v)
@@ -943,14 +1004,18 @@ def build_side_by_side_report(
                 rows_html.append(f"""
                 <tr>
                     <td class="meta">
-                        <div class="thumb-wrap">{thumb_html}</div>
-                        <div><strong>Item:</strong> {escape(item_id)}</div>
-                        <div><strong>Title:</strong> {escape(title)}</div>
-                        <div><strong>Owner:</strong> {escape(owner)}</div>
-                        <div><strong>Type:</strong> {escape(item_type)}</div>
-                        <div><strong>Matched:</strong> {escape(matched_terms)}</div>
-                        <div><strong>Replacements:</strong> {escape(repl)}</div>
-                        <div><a href="{escape(review_url)}" target="_blank">Open item</a></div>
+                        <div class="meta-inner">
+                            <div class="meta-text">
+                                <div><strong>Item:</strong> {escape(item_id)}</div>
+                                <div><strong>Title:</strong> {escape(title)}</div>
+                                <div><strong>Owner:</strong> {escape(owner)}</div>
+                                <div><strong>Type:</strong> {escape(item_type)}</div>
+                                <div><strong>Matched:</strong> {escape(matched_terms)}</div>
+                                <div><strong>Replacements:</strong> {escape(repl)}</div>
+                                <div><a href="{escape(review_url)}" target="_blank">Open item</a></div>
+                            </div>
+                            <div class="thumb-wrap">{thumb_html}</div>
+                        </div>
                     </td>
                     <td>
                         <iframe class="pane" sandbox srcdoc="{old_srcdoc}"></iframe>
@@ -983,7 +1048,9 @@ def build_side_by_side_report(
                 .meta {{ width: 25%; font-size: 13px; line-height: 1.4; position: sticky; left: 0; background: #fff; z-index: 2; }}
                 .select-cell {{ width: 85px; text-align: center; position: sticky; left: 25%; background: #fff; z-index: 2; }}
                 .select-head {{ width: 85px; text-align: center; position: sticky; left: 25%; z-index: 4; }}
-                .thumb-wrap {{ margin-bottom: 8px; }}
+                .meta-inner {{ display: flex; align-items: center; gap: 8px; min-height: 88px; }}
+                .meta-text {{ flex: 1 1 auto; min-width: 0; }}
+                .thumb-wrap {{ flex: 0 0 auto; margin-left: auto; display: flex; align-items: center; justify-content: flex-end; }}
                 .thumb {{ width: 88px; height: 56px; object-fit: cover; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; }}
                 .pane {{ width: 100%; height: 220px; border: 1px solid #ccc; background: white; }}
                 pre {{ white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }}
@@ -991,14 +1058,19 @@ def build_side_by_side_report(
                 .actions {{ display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }}
                 .actions button {{ padding: 6px 10px; border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; cursor: pointer; }}
                 .wrap {{ overflow: auto; max-height: calc(100vh - 180px); border: 1px solid #ddd; }}
+                @media (max-width: 1400px) {{
+                    .meta-inner {{ display: block; min-height: 0; }}
+                    .thumb-wrap {{ float: right; margin: 0 0 8px 8px; display: block; }}
+                    .meta::after {{ content: ""; display: block; clear: both; }}
+                }}
             </style>
         </head>
         <body>
             <h1>LicenseInfo Side-by-Side Review</h1>
-            <div class="note">Generated: {escape(ts)} | Rows: {len(df)} | only_updates={only_updates}</div>
+            <div class="note">Generated: {escape(ts)} | Rows: {len(df)}</div>
             <div class="actions">
-                <button type="button" onclick="downloadSelectedIdsJson()">Download selected IDs (JSON)</button>
-                <button type="button" onclick="downloadSelectedIdsCsv()">Download selected IDs (CSV)</button>
+                <button type="button" onclick="downloadSelectedIdsJson()">Download selected Item IDs (JSON): Upload to Notebook to use</button>
+                <button type="button" onclick="downloadSelectedIdsCsv()">Download selected Item IDs (CSV): For review/archive</button>
                 <span id="selectedCount">Selected: 0</span>
             </div>
             <div class="wrap">
@@ -1085,9 +1157,8 @@ def build_side_by_side_report(
         </html>
         """
 
-        Path(out_html).write_text(page, encoding="utf-8")
-        print(f"Wrote report: {out_html}")
-        return out_html
+        Path(report_output_path).write_text(page, encoding="utf-8")
+        return report_output_path
 
 # =====================================================================
 # Update function
@@ -1095,24 +1166,25 @@ def build_side_by_side_report(
 
 def apply_updates_btn(_button):
     context = _ctx()
-    output9 = context.get("output9")
-    selected_ids_path = context.get("selected_ids_path")
-    if output9 is None or selected_ids_path is None:
-        raise RuntimeError("context['output9'] and context['selected_ids_path'] must be configured.")
+    output10 = context.get("output10")
+    input10_ids = context.get("input10_ids")
+    input10_confirm = context.get("input10_confirm")
+    if output10 is None or input10_ids is None:
+        raise RuntimeError("Filename.json and path must be configured before running the update.")
 
-    with output9:
-        output9.clear_output()
+    with output10:
+        output10.clear_output()
         if context.get("gis") is None:
-            print("Run Setup and authenticate first.")
+            print("Run \"Setup and Authenticate\" first.")
             return
 
         plan_df = context.get("plan_df")
         if plan_df is None:
-            print("Build the dry run first so plan_df exists.")
+            print("Do a dry run first so the output exists.")
             return
 
         selected_item_ids = None
-        selected_path = (selected_ids_path.value or "").strip()
+        selected_path = (input10_ids.value or "").strip()
         if selected_path and Path(selected_path).exists():
             try:
                 if selected_path.lower().endswith(".json"):
@@ -1136,6 +1208,7 @@ def apply_updates_btn(_button):
             require_phrase="APPLY UPDATES",
             pause_seconds=0.0,
             selected_item_ids=selected_item_ids,
+            confirmation_text=(input10_confirm.value if input10_confirm is not None else None),
         )
         context["success_df"] = success_df
         context["update_errors_df"] = update_errors_df
@@ -1145,7 +1218,14 @@ def apply_updates_btn(_button):
             print("No successful updates to display.")
 
 # Function to apply the updates to AGO items. Accidental execution of this function is protected by a required input phrase "APPLY UPDATES"
-def apply_licenseinfo_updates(gis, plan_df, require_phrase="APPLY UPDATES", pause_seconds=0.0, selected_item_ids=None):
+def apply_licenseinfo_updates(
+    gis,
+    plan_df,
+    require_phrase="APPLY UPDATES",
+    pause_seconds=0.0,
+    selected_item_ids=None,
+    confirmation_text=None,
+):
     """
     Apply updates to AGO items, but only after explicit confirmation input.
 
@@ -1172,7 +1252,16 @@ def apply_licenseinfo_updates(gis, plan_df, require_phrase="APPLY UPDATES", paus
 
     print(f"WARNING: You are about to update {len(to_update)} items.")
     print(f"IF you are sure you want to do so, type {require_phrase} to continue, anything else to cancel.")
-    typed = input("Confirm: ").strip()
+
+    if confirmation_text is not None:
+        typed = str(confirmation_text).strip()
+    else:
+        try:
+            typed = input("Confirm: ").strip()
+        except EOFError:
+            print("Update canceled: this notebook runtime does not support interactive input() from button callbacks.")
+            print(f"Use the confirmation input field and type exactly: {require_phrase}")
+            return pd.DataFrame(), pd.DataFrame()
 
     if typed != require_phrase:
         print("Update canceled.")
