@@ -45,3 +45,6 @@ htmlcov/
 
 # Local test/output folders
 _local_testing/
+
+# Old work
+_oldwork/
