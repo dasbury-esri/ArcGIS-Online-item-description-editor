@@ -43,6 +43,9 @@ htmlcov/
 # Jupyter
 .ipynb_checkpoints/
 
+# VSCode
+.vscode/
+
 # Local test/output folders
 _local_testing/
 
