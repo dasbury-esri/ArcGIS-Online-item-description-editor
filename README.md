@@ -1,4 +1,4 @@
-# AGO Item Description Editor
+# ArcGIS Online Item Description Editor
 
 This repository contains an ArcGIS Online notebook workflow for scanning, reviewing, and updating the Terms of Use section of ArcGIS Online item description pages at scale.
 
