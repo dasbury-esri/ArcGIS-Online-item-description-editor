@@ -11,7 +11,7 @@ from arcgis.gis import GIS
 import pandas as pd
 from html import escape
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 # ======================================================================
 # Shared notebook runtime context configured from the notebook setup cell.
@@ -53,13 +53,78 @@ def detect_environment():
 
 current_env, env_string = detect_environment()
 
-# Define base directory to store notebook data
-BASE_DIR = Path.home() / "conversion_data"
-# When debugging locally, 
-if current_env == "vscode":
-    BASE_DIR = Path.cwd() / "_local_testing"
-# Ensure the directory exists
-BASE_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR_NAME = "ago_item_description_editor_outputs"
+
+
+def _default_output_root():
+    if current_env == "arcgisnotebook" and Path("/arcgis/home").exists():
+        return Path("/arcgis/home")
+    return Path.cwd()
+
+
+DEFAULT_OUTPUT_DIR = (_default_output_root() / OUTPUT_DIR_NAME).resolve()
+DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Backward-compatible alias for older notebook code that referenced BASE_DIR.
+BASE_DIR = DEFAULT_OUTPUT_DIR
+
+
+def get_output_dir(context=None):
+    active_context = context if context is not None else _RUNTIME_CONTEXT
+    configured_dir = None
+    if active_context:
+        configured_dir = active_context.get("output_dir")
+
+    output_dir = Path(configured_dir).expanduser() if configured_dir else DEFAULT_OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir.resolve()
+
+
+def default_output_dir_str():
+    return str(get_output_dir())
+
+
+def default_output_path_str(filename):
+    return str((get_output_dir() / filename).resolve())
+
+
+def resolve_output_path(filename_or_path, default_filename):
+    raw_value = str(filename_or_path or "").strip()
+    target_path = Path(raw_value if raw_value else default_filename).expanduser()
+    if not target_path.is_absolute():
+        target_path = get_output_dir() / target_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    return target_path.resolve()
+
+
+def resolve_existing_input_path(filename_or_path):
+    raw_value = str(filename_or_path or "").strip()
+    if not raw_value:
+        return None
+
+    candidate = Path(raw_value).expanduser()
+    candidates = [candidate] if candidate.is_absolute() else [Path.cwd() / candidate, get_output_dir() / candidate]
+    for path in candidates:
+        if path.exists():
+            return path.resolve()
+    return None
+
+
+def build_notebook_file_link(path, label):
+    resolved_path = Path(path).resolve()
+    href = resolved_path.as_uri()
+
+    try:
+        relative_path = resolved_path.relative_to(Path.cwd())
+    except ValueError:
+        relative_path = None
+
+    if current_env in {"arcgisnotebook", "jupyterlab", "classicjupyter"} and relative_path is not None:
+        href = f"files/{quote(relative_path.as_posix())}"
+
+    safe_href = escape(href, quote=True)
+    safe_label = escape(label)
+    return f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">{safe_label}</a>'
 
 # ======================================================================
 # Authentication for different environments
@@ -556,11 +621,13 @@ def run_secondary_scan_btn(button):
         matches_df = context.get("matches_df")
         if matches_df is not None and not matches_df.empty:
             exclude_ids = set(matches_df["item_id"].dropna().astype(str))
-        elif Path("scan_matches.csv").exists():
-            previous_matches_df = pd.read_csv("scan_matches.csv", dtype={"item_id": str})
-            exclude_ids = set(previous_matches_df["item_id"].dropna().astype(str))
         else:
-            exclude_ids = set()
+            previous_matches_path = resolve_existing_input_path("scan_matches.csv")
+            if previous_matches_path is not None:
+                previous_matches_df = pd.read_csv(previous_matches_path, dtype={"item_id": str})
+                exclude_ids = set(previous_matches_df["item_id"].dropna().astype(str))
+            else:
+                exclude_ids = set()
 
         new_terms = parse_target_terms(input5.value)
         if not new_terms:
@@ -579,13 +646,15 @@ def run_secondary_scan_btn(button):
         if not new_matches_df.empty and exclude_ids:
             new_matches_df = new_matches_df[~new_matches_df["item_id"].isin(exclude_ids)].copy()
 
-        new_matches_df.to_csv("secondary_scan_matches.csv", index=False)
+        secondary_output_path = resolve_output_path("secondary_scan_matches.csv", "secondary_scan_matches.csv")
+        new_matches_df.to_csv(secondary_output_path, index=False)
 
         context["new_matches_df"] = new_matches_df
         context["new_errors_df"] = new_errors_df
         context["new_all_items_df"] = new_all_items_df
 
         print(f"New matches: {len(new_matches_df)} | Errors: {len(new_errors_df)}")
+        print(f"Saved secondary scan matches to: {secondary_output_path}")
         display(new_matches_df.head(20))
 
 # =====================================================================
@@ -595,6 +664,9 @@ def run_secondary_scan_btn(button):
 def save_scan_outputs_btn(button):
     context = _ctx()
     output3 = context.get("output3")
+    input3_matches = context.get("input3_matches")
+    input3_errors = context.get("input3_errors")
+    input3_all_items = context.get("input3_all_items")
     if output3 is None:
         raise RuntimeError("context['output3'] is not configured.")
 
@@ -606,10 +678,27 @@ def save_scan_outputs_btn(button):
         if matches_df is None or errors_df is None or all_items_df is None:
             print("Run the scan first, or upload a saved run so scan data exists.")
             return
-        matches_df.to_csv("scan_matches.csv", index=False)
-        errors_df.to_csv("scan_errors.csv", index=False)
-        all_items_df.to_csv("scan_all_items.csv", index=False)
-        print("Saved: scan_matches.csv, scan_errors.csv, and scan_all_items.csv")
+
+        matches_path = resolve_output_path(
+            input3_matches.value if input3_matches is not None else None,
+            "scan_matches.csv",
+        )
+        errors_path = resolve_output_path(
+            input3_errors.value if input3_errors is not None else None,
+            "scan_errors.csv",
+        )
+        all_items_path = resolve_output_path(
+            input3_all_items.value if input3_all_items is not None else None,
+            "scan_all_items.csv",
+        )
+
+        matches_df.to_csv(matches_path, index=False)
+        errors_df.to_csv(errors_path, index=False)
+        all_items_df.to_csv(all_items_path, index=False)
+        print("Saved files:")
+        print(f"- {matches_path}")
+        print(f"- {errors_path}")
+        print(f"- {all_items_path}")
 
 def export_dry_run_btn(_button):
     context = _ctx()
@@ -633,12 +722,15 @@ def export_dry_run_btn(_button):
         if not csv_name.lower().endswith(".csv"):
             csv_name = f"{csv_name}.csv"
 
-        plan_df.to_csv(csv_name, index=False)
-        print(f"Saved: {csv_name}")
+        csv_path = resolve_output_path(csv_name, "dry_run_results.csv")
+        plan_df.to_csv(csv_path, index=False)
+        print(f"Saved: {csv_path}")
 
 def create_report_btn(_button):
     context = _ctx()
     output9 = context.get("output9")
+    input9_report_name = context.get("input9_report_name")
+    input9_selection_json = context.get("input9_selection_json")
     if output9 is None:
         raise RuntimeError("context['output9'] is not configured.")
 
@@ -649,22 +741,37 @@ def create_report_btn(_button):
             print("Build the dry run first before creating the report.")
             return
 
+        report_filename = "dry_run_report.html"
+        if input9_report_name is not None and (input9_report_name.value or "").strip():
+            report_filename = input9_report_name.value.strip()
+        if not report_filename.lower().endswith(".html"):
+            report_filename = f"{report_filename}.html"
+
+        selection_json_name = "selected_item_ids.json"
+        if input9_selection_json is not None and (input9_selection_json.value or "").strip():
+            selection_json_name = input9_selection_json.value.strip()
+        if not selection_json_name.lower().endswith(".json"):
+            selection_json_name = f"{selection_json_name}.json"
+
         report_path = build_side_by_side_report(
             plan_df,
-            report_output_path="dry_run_report.html",
+            report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html")),
             only_updates=True,
             gis=context.get("gis"),
-            selection_out_json="selected_item_ids.json",
+            selection_out_json=Path(selection_json_name).name,
         )
         context["report_path"] = report_path
         print(f"Wrote report and saved to: {report_path}")
-        print(f"\nWhen running in ArcGIS Online, open the files tab and click the file name to download. Then open the file in your browser.")
+        display(HTML(f"<div>{build_notebook_file_link(report_path, 'Open report in browser')}</div>"))
+        print(f"Selected item IDs will download from the report as: {Path(selection_json_name).name}")
         print("\nOn the report webpage, choose rows via checkboxes and click 'Download selected Item IDs (JSON)'.")
-        print("Then upload/copy that file into this notebook's working folder before running Cell 9.")
+        print("Then upload or copy that file into the notebook environment before running Step 10.")
 
 def export_final_results_btn(_button):
     context = _ctx()
     output11 = context.get("output11")
+    input11_success_csv = context.get("input11_success_csv")
+    input11_errors_csv = context.get("input11_errors_csv")
     if output11 is None:
         raise RuntimeError("context['output11'] is not configured.")
 
@@ -676,9 +783,20 @@ def export_final_results_btn(_button):
             print("Run Apply updates first to create the output.")
             return
 
-        success_df.to_csv("update_successes.csv", index=False)
-        update_errors_df.to_csv("update_errors.csv", index=False)
-        print("Saved: update_successes.csv and update_errors.csv")
+        success_path = resolve_output_path(
+            input11_success_csv.value if input11_success_csv is not None else None,
+            "update_successes.csv",
+        )
+        errors_path = resolve_output_path(
+            input11_errors_csv.value if input11_errors_csv is not None else None,
+            "update_errors.csv",
+        )
+
+        success_df.to_csv(success_path, index=False)
+        update_errors_df.to_csv(errors_path, index=False)
+        print("Saved files:")
+        print(f"- {success_path}")
+        print(f"- {errors_path}")
 
 # =====================================================================
 # Strict match filter
@@ -1184,17 +1302,17 @@ def apply_updates_btn(_button):
             return
 
         selected_item_ids = None
-        selected_path = (input10_ids.value or "").strip()
-        if selected_path and Path(selected_path).exists():
+        selected_path = resolve_existing_input_path(input10_ids.value)
+        if selected_path is not None:
             try:
-                if selected_path.lower().endswith(".json"):
-                    selected_item_ids = json.loads(Path(selected_path).read_text(encoding="utf-8"))
-                elif selected_path.lower().endswith(".csv"):
+                if selected_path.suffix.lower() == ".json":
+                    selected_item_ids = json.loads(selected_path.read_text(encoding="utf-8"))
+                elif selected_path.suffix.lower() == ".csv":
                     selected_df = pd.read_csv(selected_path, dtype=str)
                     if "item_id" in selected_df.columns:
                         selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
                 if selected_item_ids is not None:
-                    print(f"Loaded selected IDs: {len(selected_item_ids)}")
+                    print(f"Loaded selected IDs from {selected_path}: {len(selected_item_ids)}")
             except Exception as exc:
                 print(f"Could not load selected IDs file ({selected_path}): {exc}")
                 print("Proceeding without selection filter.")
