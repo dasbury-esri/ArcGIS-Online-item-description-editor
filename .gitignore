@@ -47,11 +47,11 @@ htmlcov/
 .vscode/
 
 # Local test/output folders
-_local_testing/
+.local_testing/
 ago_item_description_editor_outputs/
 
 # Old work
-_oldwork/
+.old_work/
 
 # GitHub/Copilot
 .github/
