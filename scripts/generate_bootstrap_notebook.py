@@ -35,8 +35,10 @@ def _prepare_helper_source(path: Path) -> str:
 def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
     helper_b64 = base64.b64encode(helper_source.encode("utf-8")).decode("ascii")
     tou_b64 = base64.b64encode(tou_source.encode("utf-8")).decode("ascii")
+    helper_chunks = [helper_b64[i:i + 120] for i in range(0, len(helper_b64), 120)]
+    tou_chunks = [tou_b64[i:i + 120] for i in range(0, len(tou_b64), 120)]
 
-    return [
+    lines = [
         "# Bootstrap bundled assets for the portable notebook.",
         "import base64",
         "import sys",
@@ -46,8 +48,17 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
         "RUNTIME_ROOT = Path(\"/arcgis/home\") if Path(\"/arcgis/home\").exists() else Path.cwd()",
         "RUNTIME_DIR = (RUNTIME_ROOT / OUTPUT_DIR_NAME).resolve()",
         "RUNTIME_DIR.mkdir(parents=True, exist_ok=True)",
-        f"HELPER_FUNCTIONS_B64 = \"{helper_b64}\"",
-        f"ESRI_TOU_HTML_B64 = \"{tou_b64}\"",
+        "HELPER_FUNCTIONS_B64 = (",
+    ]
+
+    lines.extend([f'    "{chunk}"' for chunk in helper_chunks])
+    lines.extend([
+        ")",
+        "ESRI_TOU_HTML_B64 = (",
+    ])
+    lines.extend([f'    "{chunk}"' for chunk in tou_chunks])
+    lines.extend([
+        ")",
         "",
         "BOOTSTRAP_FILES = {",
         "    \"helper_functions.py\": base64.b64decode(HELPER_FUNCTIONS_B64).decode(\"utf-8\"),",
@@ -64,7 +75,9 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
         "",
         "print(f\"Portable notebook assets are ready in: {RUNTIME_DIR}\")",
         "",
-    ]
+    ])
+
+    return lines
 
 
 def _update_intro_markdown(cells: list[dict]) -> None:
@@ -106,6 +119,38 @@ def _update_setup_cell(cells: list[dict], helper_source: str, tou_source: str) -
     setup_cell["source"] = _build_bootstrap_lines(helper_source, tou_source) + existing_source
 
 
+def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
+    """Ensure markdown cells have explicit newlines between logical lines.
+
+    ArcGIS notebook rendering can collapse list-of-string markdown sources when
+    lines are not newline-terminated.
+    """
+    for cell in cells:
+        if cell.get("cell_type") != "markdown":
+            continue
+
+        source = cell.get("source", [])
+        if isinstance(source, str):
+            lines = source.splitlines(keepends=True)
+            if not lines:
+                lines = ["\n"]
+            elif not lines[-1].endswith("\n"):
+                lines[-1] = f"{lines[-1]}\n"
+            cell["source"] = lines
+            continue
+
+        normalized_lines: list[str] = []
+        for entry in source:
+            text = str(entry)
+            if text.endswith("\n"):
+                normalized_lines.append(text)
+            elif text == "":
+                normalized_lines.append("\n")
+            else:
+                normalized_lines.append(f"{text}\n")
+        cell["source"] = normalized_lines
+
+
 def build_portable_notebook(source_notebook: Path, output_notebook: Path) -> Path:
     notebook = _load_notebook(source_notebook)
     cells = notebook.get("cells", [])
@@ -117,6 +162,7 @@ def build_portable_notebook(source_notebook: Path, output_notebook: Path) -> Pat
 
     _update_intro_markdown(cells)
     _update_setup_cell(cells, helper_source, tou_source)
+    _normalize_markdown_cell_sources(cells)
 
     output_notebook.write_text(json.dumps(notebook, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
     return output_notebook
