@@ -32,10 +32,11 @@ Placeholder link:
 1. Set up and authenticate.
 2. Scan content for target strings or HTML.
 3. Save or reload scan results.
-4. Build and export a dry-run plan.
-5. Create and review the HTML comparison report.
-6. Apply updates after explicit confirmation.
-7. Export final success and error results.
+4. Do a dry-run to build and export a HTML review page.
+5. Review the HTML comparison report. After checking the items you want to edit, export those items as JSON.
+6. Import the JSON file back to the notebook.
+7. Apply updates only after explicit confirmation.
+8. Export final success and error results.
 
 ## Regenerating The Portable Notebook
 

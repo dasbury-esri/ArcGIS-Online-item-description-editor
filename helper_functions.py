@@ -53,7 +53,7 @@ def detect_environment():
 
 current_env, env_string = detect_environment()
 
-OUTPUT_DIR_NAME = "ago_item_description_editor_outputs"
+OUTPUT_DIR_NAME = "notebook_outputs"
 
 
 def _default_output_root():
@@ -110,7 +110,7 @@ def resolve_existing_input_path(filename_or_path):
     return None
 
 
-def build_notebook_file_link(path, label):
+def build_notebook_file_link(path, label, as_button=False):
     resolved_path = Path(path).resolve()
     href = resolved_path.as_uri()
 
@@ -120,15 +120,35 @@ def build_notebook_file_link(path, label):
         relative_path = None
 
     if current_env in {"arcgisnotebook", "jupyterlab", "classicjupyter"} and relative_path is not None:
-        href = f"files/{quote(relative_path.as_posix())}"
+        # Use an absolute files route to avoid duplicated /files/files/... URLs.
+        href = f"/files/{quote(relative_path.as_posix())}"
 
     safe_href = escape(href, quote=True)
     safe_label = escape(label)
+
+    if as_button:
+        return (
+            f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer" '
+            'style="display:inline-block; padding:8px 12px; border-radius:6px; '
+            'background:#e8f2ff; border:1px solid #bfd8ff; color:#1558a6; '
+            'text-decoration:none; font-weight:600; font-size:13px;">'
+            f'{safe_label}</a>'
+        )
+
     return f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">{safe_label}</a>'
 
 
 def count_phrase(count, singular, plural=None):
-    noun = singular if count == 1 else (plural or f"{singular}s")
+    if count == 1:
+        noun = singular
+    elif plural:
+        noun = plural
+    elif singular.endswith(("s", "x", "z", "ch", "sh")):
+        noun = f"{singular}es"
+    elif len(singular) > 1 and singular.endswith("y") and singular[-2].lower() not in "aeiou":
+        noun = f"{singular[:-1]}ies"
+    else:
+        noun = f"{singular}s"
     return f"{count} {noun}"
 
 # ======================================================================
@@ -236,6 +256,59 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
         )
     else:
         raise ValueError("Unsupported widget_type")
+
+def _spinner_status_html(message):
+    safe_message = escape(message)
+    return (
+        "<span style='display:inline-flex; align-items:center; gap:8px; color:#555;'>"
+        "<span style='width:12px; height:12px; border:2px solid #c8c8c8; border-top-color:#2b7cd3; "
+        "border-radius:50%; display:inline-block; animation: spin 0.9s linear infinite;'></span>"
+        f"{safe_message}"
+        "</span>"
+        "<style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>"
+    )
+
+
+def bind_button_with_status(
+    button,
+    action,
+    status_key,
+    start_message,
+    success_message="Done.",
+    failure_message="Action failed. See details below.",
+    output_key=None,
+):
+    """Bind a button click to an action with spinner-style status updates."""
+    context = _ctx()
+
+    def _wrapped(clicked_button):
+        status_widget = context.get(status_key)
+        active_button = button if button is not None else clicked_button
+
+        if status_widget is not None:
+            status_widget.value = _spinner_status_html(start_message)
+
+        if active_button is not None:
+            active_button.disabled = True
+
+        try:
+            action(clicked_button)
+            if status_widget is not None:
+                status_widget.value = f"<span style='color:#2e7d32;'>{escape(success_message)}</span>"
+        except Exception as exc:
+            if status_widget is not None:
+                status_widget.value = f"<span style='color:#b00020;'>{escape(failure_message)}</span>"
+
+            output_widget = context.get(output_key) if output_key else None
+            if output_widget is not None:
+                with output_widget:
+                    print(f"Unexpected error: {exc}")
+            raise
+        finally:
+            if active_button is not None:
+                active_button.disabled = False
+
+    button.on_click(_wrapped)
     
 def setup_notebook_btn(button):
     context = _ctx()
@@ -566,11 +639,11 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
                         "owner": item.get("owner"),
                         "type": item.get("type"),
                         "access": access,
+                        "licenseInfo": license_info,
+                        "matched_terms": ", ".join(matched),                        
                         "public_url": public_url,
                         "portal_url": portal_url,
                         "thumbnail": item.get("thumbnail") or "",
-                        "matched_terms": ", ".join(matched),
-                        "licenseInfo": license_info
                     })
 
                 total_scanned += 1
@@ -599,9 +672,17 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
         matches_df["review_url"] = matches_df["public_url"].fillna(matches_df["portal_url"])
     else:
         matches_df = pd.DataFrame(columns=[
-            "item_id","title","owner","type","access",
-            "public_url","portal_url","review_url","thumbnail",
-            "matched_terms","licenseInfo"
+            "item_id",
+            "title",
+            "owner",
+            "type",
+            "access",
+            "licenseInfo",
+            "matched_terms",
+            "public_url",
+            "portal_url",
+            "thumbnail",
+            "review_url",
         ])
 
     print(f"\n*** Done! ***")
@@ -777,10 +858,63 @@ def create_report_btn(_button):
         )
         context["report_path"] = report_path
         print(f"Report saved to: {report_path}")
-        display(HTML(f"<div>{build_notebook_file_link(report_path, 'Open report in browser')}</div>"))
-        print(f"Selected item IDs will download from the report as: {Path(selection_json_name).name}")
+        display(HTML(f"<div>{build_notebook_file_link(report_path, 'Open report in browser', as_button=True)}</div>"))
         print("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.")
-        print("Then upload or copy that file into the notebook environment before running Step 10.")
+        print(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 10.")
+        print(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}")
+
+def load_previous_scan_btn(_button):
+    context = _ctx()
+    output4 = context.get("output4")
+    input4_matches = context.get("input4_matches")
+    input4_errors = context.get("input4_errors")
+    input4_all_items = context.get("input4_all_items")
+    if output4 is None or input4_matches is None or input4_errors is None or input4_all_items is None:
+        raise RuntimeError("Step 4 inputs and output must be configured.")
+
+    with output4:
+        output4.clear_output()
+
+        matches_path = (input4_matches.value or "").strip()
+        errors_path = (input4_errors.value or "").strip()
+        all_items_path = (input4_all_items.value or "").strip()
+
+        if not matches_path or not Path(matches_path).exists():
+            print(f"Matches file not found: {matches_path}")
+            return
+        if not all_items_path or not Path(all_items_path).exists():
+            print(f"All-items file not found: {all_items_path}")
+            return
+
+        context["matches_df"] = pd.read_csv(matches_path, dtype={"item_id": str})
+
+        if errors_path and Path(errors_path).exists():
+            try:
+                context["errors_df"] = pd.read_csv(errors_path)
+            except pd.errors.EmptyDataError:
+                context["errors_df"] = pd.DataFrame(columns=["username", "error"])
+        else:
+            context["errors_df"] = pd.DataFrame(columns=["username", "error"])
+            print(f"Errors file not found or blank, using empty table: {errors_path}")
+
+        context["all_items_df"] = pd.read_csv(all_items_path, dtype={"item_id": str})
+
+        print(
+            f"Reloaded: matches={len(context['matches_df'])}, "
+            f"errors={len(context['errors_df'])}, "
+            f"all_items={len(context['all_items_df'])}"
+        )
+
+
+def run_dry_run_with_file_btn(_button):
+    context = _ctx()
+    input7 = context.get("input7")
+    if input7 is None:
+        raise RuntimeError("context['input7'] is not configured.")
+
+    entered = (input7.value or "").strip()
+    context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
+    dry_run_btn(_button)
 
 def export_final_results_btn(_button):
     context = _ctx()
@@ -871,7 +1005,7 @@ def dry_run_btn(_button):
         dry_run_table = show_dry_run(plan_df, max_rows=200)
         context["plan_df"] = plan_df
         context["dry_run_table"] = dry_run_table
-        print("Showing up to 3 rows from the dry-run plan:")
+        print("Showing 3 rows from the dry-run:")
         display(dry_run_table[:3])
 
 # Canonical replacement block source file (overridable from notebook UI).

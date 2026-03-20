@@ -22,7 +22,7 @@ def _prepare_helper_source(path: Path) -> str:
     helper_source = path.read_text(encoding="utf-8")
     helper_source, replacements = re.subn(
         r'^OFFICIAL_TOU_HTML_FILE\s*=\s*.+$',
-        'OFFICIAL_TOU_HTML_FILE = str(((Path("/arcgis/home") if Path("/arcgis/home").exists() else Path.cwd()) / "Esri_ToU.html").resolve())',
+        'OFFICIAL_TOU_HTML_FILE = str((((Path("/arcgis/home") if Path("/arcgis/home").exists() else Path.cwd()) / OUTPUT_DIR_NAME) / "Esri_ToU.html").resolve())',
         helper_source,
         count=1,
         flags=re.MULTILINE,
@@ -42,7 +42,10 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
         "import sys",
         "from pathlib import Path",
         "",
-        "RUNTIME_DIR = Path(\"/arcgis/home\") if Path(\"/arcgis/home\").exists() else Path.cwd()",
+        "OUTPUT_DIR_NAME = \"notebook_outputs\"",
+        "RUNTIME_ROOT = Path(\"/arcgis/home\") if Path(\"/arcgis/home\").exists() else Path.cwd()",
+        "RUNTIME_DIR = (RUNTIME_ROOT / OUTPUT_DIR_NAME).resolve()",
+        "RUNTIME_DIR.mkdir(parents=True, exist_ok=True)",
         f"HELPER_FUNCTIONS_B64 = \"{helper_b64}\"",
         f"ESRI_TOU_HTML_B64 = \"{tou_b64}\"",
         "",
