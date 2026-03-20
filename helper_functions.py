@@ -119,9 +119,10 @@ def build_notebook_file_link(path, label, as_button=False):
     except ValueError:
         relative_path = None
 
-    if current_env in {"arcgisnotebook", "jupyterlab", "classicjupyter"} and relative_path is not None:
-        # Use an absolute files route to avoid duplicated /files/files/... URLs.
-        href = f"/files/{quote(relative_path.as_posix())}"
+    if current_env in {"arcgisnotebook", "jupyterlab", "classicjupyter"}:
+        # Use an absolute files route to avoid cwd-dependent broken links like
+        # /files/home/... when runtime cwd is /arcgis.
+        href = f"/files{quote(resolved_path.as_posix(), safe='/')}"
 
     safe_href = escape(href, quote=True)
     safe_label = escape(label)
