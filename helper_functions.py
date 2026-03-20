@@ -126,6 +126,11 @@ def build_notebook_file_link(path, label):
     safe_label = escape(label)
     return f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">{safe_label}</a>'
 
+
+def count_phrase(count, singular, plural=None):
+    noun = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {noun}"
+
 # ======================================================================
 # Authentication for different environments
 # ======================================================================
@@ -141,7 +146,7 @@ def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=Non
     def finish_auth(gis):
         context["gis"] = gis
         print(f"Authenticated as: {context['gis'].properties.user.username} (role: {context['gis'].properties.user.role} / userType: {context['gis'].properties.user.userLicenseTypeId})")
-        print("\nStep #1 complete. Click the Markdown text below and then click the 'Play' button twice to proceed.")
+        print("\nStep 1 is complete. Continue to the next step when you are ready.")
 
     # Try ArcGIS Notebook profile
     if current_env == "arcgisnotebook":
@@ -291,7 +296,7 @@ def run_primary_scan_btn(button):
     with output2:
         output2.clear_output()
         if context.get("gis") is None:
-            print("Please run Setup and authenticate first.")
+            print("Please run Step 1: Setup and authenticate first.")
             return
 
         terms = parse_target_terms(input2.value)
@@ -301,7 +306,7 @@ def run_primary_scan_btn(button):
 
         input2.value = normalize_target_terms_text(terms)
 
-        print(f"Running scan with {len(terms)} term(s)...")
+        print(f"Running scan with {count_phrase(len(terms), 'term')}...")
         matches_df, errors_df, all_items_df = scan_org_licenseinfo_without_10k_cap(
             context["gis"],
             target_strings=terms,
@@ -311,9 +316,16 @@ def run_primary_scan_btn(button):
         context["all_items_df"] = all_items_df
         context["TARGET_STRINGS"] = terms
 
-        print(f"Matches: {len(matches_df)} | Errors: {len(errors_df)}")
-        print("First 3 sample matches:")
-        display(matches_df.head(3))
+        print(
+            f"Scan results: {count_phrase(len(matches_df), 'match')} | "
+            f"{count_phrase(len(errors_df), 'error')}"
+        )
+        sample_count = min(len(matches_df), 3)
+        if sample_count:
+            print(f"Showing {count_phrase(sample_count, 'sample match')}:")
+            display(matches_df.head(sample_count))
+        else:
+            print("No sample matches to display.")
 
 
 def _paged_get(gis, path, params=None, records_key="items", page_size=100):
@@ -380,7 +392,7 @@ def get_all_items_for_user(gis, username, user_idx=None, page_size=25, progress_
     next_tick = progress_every
 
     def show_progress(found, done=False):
-        line = f"{prefix} Found {found} items"
+        line = f"{prefix} Found {count_phrase(found, 'item')}"
         print(line, end="\n" if done else "\r", flush=True)
 
     def add_and_report(rows):
@@ -513,7 +525,7 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
     exclude_set = {str(x) for x in (exclude_item_ids or [])}
 
     usernames = get_all_org_usernames(gis)
-    print(f"Users found: {len(usernames)}")
+    print(f"Users found: {count_phrase(len(usernames), 'user')}")
 
     matches = []
     errors = []
@@ -567,10 +579,10 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
 
             if u_idx % 25 == 0:
                 print(
-                    f"Processed users: {u_idx}/{len(usernames)} | "
-                    f"unique seen: {len(all_seen)} | "
-                    f"scanned after exclusions: {total_scanned} | "
-                    f"excluded: {total_skipped_excluded}"
+                    f"Processed {u_idx} of {len(usernames)} users | "
+                    f"{count_phrase(len(all_seen), 'unique item')} seen | "
+                    f"{count_phrase(total_scanned, 'item')} scanned after exclusions | "
+                    f"{count_phrase(total_skipped_excluded, 'item')} excluded"
                 )
 
         except Exception as exc:
@@ -593,9 +605,9 @@ def scan_org_licenseinfo_without_10k_cap(gis, target_strings=None, pause_seconds
         ])
 
     print(f"\n*** Done! ***")
-    print(f"Number of unique items found: {len(all_seen)}")
-    print(f"Number of items excluded (from previous run): {total_skipped_excluded}")
-    print(f"Number of items scanned: {total_scanned}")
+    print(f"Unique items found: {count_phrase(len(all_seen), 'item')}")
+    print(f"Items excluded from previous run: {count_phrase(total_skipped_excluded, 'item')}")
+    print(f"Items scanned: {count_phrase(total_scanned, 'item')}")
 
     return matches_df, errors_df, all_items_df
 
@@ -611,11 +623,11 @@ def run_secondary_scan_btn(button):
         output5.clear_output()
 
         if not checkbox5.value:
-            print("Secondary scan not run (check box above to enable)")
+            print("Secondary scan is disabled. Select the checkbox above to run it.")
             return
 
         if context.get("gis") is None:
-            print("Please run Setup and authenticate first.")
+            print("Please run Step 1: Setup and authenticate first.")
             return
 
         matches_df = context.get("matches_df")
@@ -636,7 +648,7 @@ def run_secondary_scan_btn(button):
 
         input5.value = normalize_target_terms_text(new_terms)
 
-        print(f"Running secondary scan with {len(new_terms)} term(s)...")
+        print(f"Running secondary scan with {count_phrase(len(new_terms), 'term')}...")
         new_matches_df, new_errors_df, new_all_items_df = scan_org_licenseinfo_without_10k_cap(
             context["gis"],
             target_strings=new_terms,
@@ -653,7 +665,10 @@ def run_secondary_scan_btn(button):
         context["new_errors_df"] = new_errors_df
         context["new_all_items_df"] = new_all_items_df
 
-        print(f"New matches: {len(new_matches_df)} | Errors: {len(new_errors_df)}")
+        print(
+            f"Secondary scan results: {count_phrase(len(new_matches_df), 'new match')} | "
+            f"{count_phrase(len(new_errors_df), 'error')}"
+        )
         print(f"Saved secondary scan matches to: {secondary_output_path}")
         display(new_matches_df.head(20))
 
@@ -676,7 +691,7 @@ def save_scan_outputs_btn(button):
         errors_df = context.get("errors_df")
         all_items_df = context.get("all_items_df")
         if matches_df is None or errors_df is None or all_items_df is None:
-            print("Run the scan first, or upload a saved run so scan data exists.")
+            print("Run Step 2 or load saved scan files first.")
             return
 
         matches_path = resolve_output_path(
@@ -710,7 +725,7 @@ def export_dry_run_btn(_button):
         output8.clear_output()
         plan_df = context.get("plan_df")
         if plan_df is None:
-            print("Build the dry run first so plan_df exists.")
+            print("Build the dry-run plan first.")
             return
 
         input8_csv_name = context.get("input8_csv_name")
@@ -724,7 +739,7 @@ def export_dry_run_btn(_button):
 
         csv_path = resolve_output_path(csv_name, "dry_run_results.csv")
         plan_df.to_csv(csv_path, index=False)
-        print(f"Saved: {csv_path}")
+        print(f"Saved file: {csv_path}")
 
 def create_report_btn(_button):
     context = _ctx()
@@ -738,7 +753,7 @@ def create_report_btn(_button):
         output9.clear_output()
         plan_df = context.get("plan_df")
         if plan_df is None:
-            print("Build the dry run first before creating the report.")
+            print("Build the dry-run plan before creating the report.")
             return
 
         report_filename = "dry_run_report.html"
@@ -761,10 +776,10 @@ def create_report_btn(_button):
             selection_out_json=Path(selection_json_name).name,
         )
         context["report_path"] = report_path
-        print(f"Wrote report and saved to: {report_path}")
+        print(f"Report saved to: {report_path}")
         display(HTML(f"<div>{build_notebook_file_link(report_path, 'Open report in browser')}</div>"))
         print(f"Selected item IDs will download from the report as: {Path(selection_json_name).name}")
-        print("\nOn the report webpage, choose rows via checkboxes and click 'Download selected Item IDs (JSON)'.")
+        print("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.")
         print("Then upload or copy that file into the notebook environment before running Step 10.")
 
 def export_final_results_btn(_button):
@@ -780,7 +795,7 @@ def export_final_results_btn(_button):
         success_df = context.get("success_df")
         update_errors_df = context.get("update_errors_df")
         if success_df is None or update_errors_df is None:
-            print("Run Apply updates first to create the output.")
+            print("Run Step 10 first to create the export data.")
             return
 
         success_path = resolve_output_path(
@@ -813,12 +828,12 @@ def run_strict_match_filter_btn(_button):
         output6.clear_output()
         matches_df = context.get("matches_df")
         if matches_df is None:
-            print("Run the scan first so matches_df exists.")
+            print("Run Step 2 or load saved scan files first.")
             return
 
         exact_term = (input6.value or "").strip()
         if not exact_term:
-            print("Enter an exact term to filter on.")
+            print("Enter exact text to filter the results.")
             return
 
         exact_url_df = matches_df[
@@ -830,7 +845,7 @@ def run_strict_match_filter_btn(_button):
         ].copy()
         context["exact_url_df"] = exact_url_df
 
-        print(f"Number of items with exact matches: {len(exact_url_df)}")
+        print(f"Exact-match results: {count_phrase(len(exact_url_df), 'item')}")
         display(exact_url_df.head(50))
 
 # =====================================================================
@@ -847,7 +862,7 @@ def dry_run_btn(_button):
         output7.clear_output()
         matches_df = context.get("matches_df")
         if matches_df is None:
-            print("Run the scan first so matches_df exists.")
+            print("Run Step 2 or load saved scan files first.")
             return
 
         tou_path = context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE)
@@ -856,7 +871,7 @@ def dry_run_btn(_button):
         dry_run_table = show_dry_run(plan_df, max_rows=200)
         context["plan_df"] = plan_df
         context["dry_run_table"] = dry_run_table
-        print("Preview of first 3 rows")
+        print("Showing up to 3 rows from the dry-run plan:")
         display(dry_run_table[:3])
 
 # Canonical replacement block source file (overridable from notebook UI).
@@ -1052,7 +1067,10 @@ def show_dry_run(plan_df, max_rows=50):
     to_update[display_cols]: a DataFrame filtered to the rows that would be updated.
     """
     to_update = plan_df[plan_df["will_update"] == True].copy()
-    print(f"Dry-run summary: {len(plan_df)} matched rows, {len(to_update)} rows would be updated.")
+    print(
+        f"Dry-run summary: {count_phrase(len(plan_df), 'matched row')}, "
+        f"{count_phrase(len(to_update), 'row')} would be updated."
+    )
     display_cols = [
         "item_id", "title", "owner", "type",
         "matched_terms", "replacements_found", "old_preview", "new_preview"
@@ -1185,11 +1203,11 @@ def build_side_by_side_report(
         </head>
         <body>
             <h1>LicenseInfo Side-by-Side Review</h1>
-            <div class="note">Generated: {escape(ts)} | Rows: {len(df)}</div>
+            <div class="note">Generated: {escape(ts)} | {escape(count_phrase(len(df), 'row'))}</div>
             <div class="actions">
                 <button type="button" onclick="downloadSelectedIdsJson()">Download selected Item IDs (JSON): Upload to Notebook to use</button>
                 <button type="button" onclick="downloadSelectedIdsCsv()">Download selected Item IDs (CSV): For review/archive</button>
-                <span id="selectedCount">Selected: 0</span>
+                <span id="selectedCount">Selected: 0 items</span>
             </div>
             <div class="wrap">
                 <table>
@@ -1219,7 +1237,7 @@ def build_side_by_side_report(
 
                 function updateSelectedCount() {{
                     const selected = getSelectedIds();
-                    countEl.textContent = 'Selected: ' + selected.length;
+                    countEl.textContent = 'Selected: ' + selected.length + ' ' + (selected.length === 1 ? 'item' : 'items');
                 }}
 
                 function syncToggleState() {{
@@ -1293,12 +1311,12 @@ def apply_updates_btn(_button):
     with output10:
         output10.clear_output()
         if context.get("gis") is None:
-            print("Run \"Setup and Authenticate\" first.")
+            print("Please run Step 1: Setup and authenticate first.")
             return
 
         plan_df = context.get("plan_df")
         if plan_df is None:
-            print("Do a dry run first so the output exists.")
+            print("Build the dry-run plan first.")
             return
 
         selected_item_ids = None
@@ -1312,13 +1330,16 @@ def apply_updates_btn(_button):
                     if "item_id" in selected_df.columns:
                         selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
                 if selected_item_ids is not None:
-                    print(f"Loaded selected IDs from {selected_path}: {len(selected_item_ids)}")
+                    print(
+                        f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
+                        f"from {selected_path}"
+                    )
             except Exception as exc:
                 print(f"Could not load selected IDs file ({selected_path}): {exc}")
-                print("Proceeding without selection filter.")
+                print("Continuing without a selection filter.")
                 selected_item_ids = None
         else:
-            print("No selected IDs file found. Applying to all rows where will_update=True.")
+            print("No selected IDs file was found. Applying updates to all rows where will_update=True.")
 
         success_df, update_errors_df = apply_licenseinfo_updates(
             context["gis"],
@@ -1362,14 +1383,14 @@ def apply_licenseinfo_updates(
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        print(f"Selection filter applied. Rows selected for update: {len(to_update)}")
+        print(f"Selection filter applied. {count_phrase(len(to_update), 'row')} selected for update.")
 
     if to_update.empty:
         print("Nothing to update.")
         return pd.DataFrame(), pd.DataFrame()
 
-    print(f"WARNING: You are about to update {len(to_update)} items.")
-    print(f"IF you are sure you want to do so, type {require_phrase} to continue, anything else to cancel.")
+    print(f"WARNING: You are about to update {count_phrase(len(to_update), 'item')}.")
+    print(f"If you want to continue, type {require_phrase}. Type anything else to cancel.")
 
     if confirmation_text is not None:
         typed = str(confirmation_text).strip()
@@ -1417,10 +1438,13 @@ def apply_licenseinfo_updates(
             time.sleep(pause_seconds)
 
         if i % 50 == 0:
-            print(f"Processed {i}/{len(to_update)}")
+            print(f"Processed {i} of {len(to_update)} updates")
 
     success_df = pd.DataFrame(success_rows)
     errors_df = pd.DataFrame(error_rows)
 
-    print(f"Done. Success: {len(success_df)}  Errors: {len(errors_df)}")
+    print(
+        f"Update results: {count_phrase(len(success_df), 'success')} | "
+        f"{count_phrase(len(errors_df), 'error')}"
+    )
     return success_df, errors_df
