@@ -11,6 +11,8 @@ The workflow is designed to help identify outdated or unwanted text and HTML in 
 
 Use the source notebook when you are editing logic, refining UX, or updating the workflow.
 
+Run `scripts/generate_bootstrap_notebook.py` to create a portable notebook with embeded helpers and HTML template files.
+
 Use the portable notebook when you want a single file that can be shared and run more consistently in ArcGIS Online.
 
 ## Repository Contents
