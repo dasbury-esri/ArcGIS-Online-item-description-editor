@@ -82,31 +82,6 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
 
 def _update_intro_markdown(cells: list[dict]) -> None:
     cells[0]["source"] = ["# Bulk editor for ArcGIS Online Item Description pages"]
-    cells[1]["source"] = [
-        "**Welcome!**  ",
-        "This portable notebook helps you scan, review, and update ArcGIS Online items at scale. It focuses on the Terms of Use section, stored in the `licenseInfo` field, and looks for target text or HTML that you want to replace.",
-        "",
-        "This version bundles `helper_functions.py` and `Esri_ToU.html` into the notebook and writes them into the runtime automatically during Step 1.",
-        "",
-        "**Where this notebook can run**  ",
-        "- ArcGIS Online Notebook (JupyterLab-style).",
-        "- VS Code on macOS with a local Jupyter kernel.",
-        "- VS Code on Windows with a local Jupyter kernel.",
-        "",
-        "**How to use this notebook**  ",
-        "- Start with **1. Setup and authenticate** to write the bundled files and connect to your organization.",
-        "- Run **2. Scan your content** to find matching terms.",
-        "- Save the scan outputs, optionally run a secondary scan, and review exact matches if needed.",
-        "- Build a **dry-run plan** to see exactly what would change before anything is updated.",
-        "- Use the dry-run output to create an HTML review report for side-by-side comparison.",
-        "- Commit updates only after you have reviewed the dry-run and report outputs.",
-        "",
-        "**Notes**  ",
-        "- Organization-wide scans can take time, especially in large orgs, so progress messages are shown as users are processed.",
-        "- The workflow is designed to be safe by default: review first, then update.",
-        "- If you need to restart, restart the kernel and begin again at Step 1 so the bundled files are written again.",
-        "- In ArcGIS Online, you can use **View > Collapse All Code** for a cleaner, more user-friendly layout.",
-    ]
     cells[4]["source"] = [
         "## 1. Setup and authenticate",
         "Write the bundled helper files into the runtime, then initialize the notebook environment and connect to ArcGIS Online.",
