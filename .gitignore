@@ -52,3 +52,6 @@ ago_item_description_editor_outputs/
 
 # Old work
 _oldwork/
+
+# GitHub/Copilot
+.github/
