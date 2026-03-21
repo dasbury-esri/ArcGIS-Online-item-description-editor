@@ -354,6 +354,13 @@ def bind_button_with_status(
 ):
     """Bind a button click to an action with spinner-style status updates."""
     context = _ctx()
+    status_colors = {
+        "success": "#2e7d32",
+        "warning": "#8a6d3b",
+        "info": "#555",
+        "failure": "#b00020",
+        "error": "#b00020",
+    }
 
     def _wrapped(clicked_button):
         status_widget = context.get(status_key)
@@ -368,7 +375,12 @@ def bind_button_with_status(
         try:
             action_result = action(clicked_button)
             if status_widget is not None:
-                if action_result is False:
+                if isinstance(action_result, dict) and action_result.get("status"):
+                    result_status = str(action_result.get("status")).lower()
+                    result_message = str(action_result.get("message") or success_message)
+                    color = status_colors.get(result_status, status_colors["info"])
+                    status_widget.value = f"<span style='color:{color};'>{escape(result_message)}</span>"
+                elif action_result is False:
                     status_widget.value = (
                         "<span style='color:#8a6d3b;'>"
                         "Setup initialized."
@@ -1175,8 +1187,12 @@ def run_secondary_scan_btn(button):
         f"{count_phrase(len(new_errors_df), 'error')}\n"
     )
     output5.append_stdout("Use the next step to save secondary scan outputs.\n")
-    output5.append_stdout("Showing the first 3 matches:\n")
-    output5.append_display_data(new_matches_df.head(3))
+    sample_count = min(len(new_matches_df), 3)
+    if sample_count:
+        output5.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
+        output5.append_display_data(new_matches_df.head(sample_count))
+    else:
+        output5.append_stdout("No sample matches to display.\n")
 
 # =====================================================================
 # File handling
@@ -1259,7 +1275,7 @@ def save_secondary_scan_outputs_btn(button):
     all_items_df = context.get("new_all_items_df")
     if matches_df is None or errors_df is None or all_items_df is None:
         output6.append_stdout("Run Step 5 secondary scan first.\n")
-        return
+        return {"status": "warning", "message": "Secondary save skipped. Run Step 5 first."}
 
     matches_path = resolve_output_path(
         input6_secondary_matches.value if input6_secondary_matches is not None else None,
@@ -1312,6 +1328,7 @@ def create_report_btn(_button):
     output10 = context.get("output10")
     input10_report_name = context.get("input10_report_name")
     input10_selection_json = context.get("input10_selection_json")
+    input10_limit = context.get("input10_limit")
     if output10 is None:
         raise RuntimeError("context['output10'] is not configured.")
 
@@ -1319,6 +1336,15 @@ def create_report_btn(_button):
     plan_df = context.get("plan_df")
     if plan_df is None:
         output10.append_stdout("Do a dry-run before creating the report.\n")
+        return
+
+    try:
+        max_rows = _parse_optional_positive_int(
+            input10_limit.value if input10_limit is not None else None,
+            "Optional match cap",
+        )
+    except ValueError as exc:
+        output10.append_stdout(f"{exc}\n")
         return
 
     report_filename = "dry_run_report.html"
@@ -1333,10 +1359,17 @@ def create_report_btn(_button):
     if not selection_json_name.lower().endswith(".json"):
         selection_json_name = f"{selection_json_name}.json"
 
+    plan_for_report = plan_df.copy()
+    if max_rows is None:
+        output10.append_stdout("Creating report for all planned updates...\n")
+    else:
+        plan_for_report = plan_for_report[plan_for_report["will_update"] == True].head(max_rows).copy()
+        output10.append_stdout(f"Creating report with a match cap of {max_rows} planned update rows...\n")
+
     report_path = build_side_by_side_report(
-        plan_df,
+        plan_for_report,
         report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html")),
-        only_updates=True,
+        only_updates=max_rows is None,
         gis=context.get("gis"),
         selection_out_json=Path(selection_json_name).name,
     )
@@ -1495,8 +1528,12 @@ def run_strict_match_filter_btn(_button):
     context["exact_url_df"] = exact_url_df
 
     output7.append_stdout(f"Exact-match results: {count_phrase(len(exact_url_df), 'item')}\n")
-    output7.append_stdout(f"Showing the first 3 results:\n")
-    output7.append_display_data(exact_url_df.head(3))
+    sample_count = min(len(exact_url_df), 3)
+    if sample_count:
+        output7.append_stdout(f"Showing {count_phrase(sample_count, 'sample result')}:\n")
+        output7.append_display_data(exact_url_df.head(sample_count))
+    else:
+        output7.append_stdout("No exact-match results to display.\n")
 
 # =====================================================================
 # Dry run functions
@@ -1514,19 +1551,35 @@ def dry_run_btn(_button):
         output8.append_stdout("Run Step 2 or load saved scan files first.\n")
         return
 
+    checkbox8 = context.get("checkbox8")
+    strict_match = bool(checkbox8.value) if checkbox8 is not None else False
+    context["strict_match_updates"] = strict_match
+
     tou_path = context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE)
     replacement_tou = load_official_tou_html(tou_path)
-    plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou)
+    plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou, strict_match=strict_match)
     dry_run_table = show_dry_run(plan_df, max_rows=200)
     rows_would_update = int((plan_df["will_update"] == True).sum())
     context["plan_df"] = plan_df
     context["dry_run_table"] = dry_run_table
+    if strict_match:
+        output8.append_stdout(
+            "Dry-run mode: strict matching enabled. Only canonical Esri Terms of Use blocks with summary and terms links in the expected order will be replaced.\n"
+        )
+    else:
+        output8.append_stdout(
+            "Dry-run mode: default semi-greedy matching enabled. The matcher can bridge across bounded formatting differences between the logo, license text, and links.\n"
+        )
     output8.append_stdout(
         f"Dry-run summary: {count_phrase(len(plan_df), 'matched row')}, "
         f"{count_phrase(rows_would_update, 'row')} would be updated.\n"
     )
-    output8.append_stdout(f"Showing first 3 rows from the dry-run:\n")
-    output8.append_display_data(dry_run_table[:3])
+    sample_count = min(len(dry_run_table), 3)
+    if sample_count:
+        output8.append_stdout(f"Showing {count_phrase(sample_count, 'sample dry-run row')}:\n")
+        output8.append_display_data(dry_run_table.head(sample_count))
+    else:
+        output8.append_stdout("No dry-run rows to display.\n")
 
 # Canonical replacement block source file (overridable from notebook UI).
 OFFICIAL_TOU_HTML_FILE = "/Users/davi6569/Documents/GitHub/AGO-item-description-editor/Esri_ToU.html"
@@ -1555,9 +1608,10 @@ LICENSE_TEXT_RE = (
 )
 LOGO_RE = r"(?:esrilogo_new\.png|esri-logo\.jpg)"
 
-# Core matcher:
-# starts at a logo img and ends at the "View Terms of Use" link anchor.
-# Keeps content before/after untouched.
+# Default semi-greedy matcher:
+# starts at a logo img and scans forward within bounded distance to the
+# license text and optional summary/terms links.
+# Keeps content before/after untouched while tolerating formatting drift.
 TOU_BLOCK_RE = re.compile(
     rf"""(?isx)
     <img\b[^>]*src=['"][^'"]*{LOGO_RE}[^'"]*['"][^>]*>
@@ -1569,6 +1623,22 @@ TOU_BLOCK_RE = re.compile(
         [\s\S]{{0,2000}}?
         <a\b[^>]*href=['"][^'"]*{TERMS_URL_RE}[^'"]*['"][^>]*>[\s\S]*?</a>
     )?
+    """,
+    re.IGNORECASE | re.DOTALL | re.VERBOSE,
+)
+
+# Strict matcher:
+# requires the recognized logo, license text, summary link, and terms link
+# in the expected order with tighter bounds between segments.
+STRICT_TOU_BLOCK_RE = re.compile(
+    rf"""(?isx)
+    <img\b[^>]*src=['"][^'"]*{LOGO_RE}[^'"]*['"][^>]*>
+    [\s\S]{{0,2000}}?
+    {LICENSE_TEXT_RE}
+    [\s\S]{{0,1500}}?
+    <a\b[^>]*href=['"][^'"]*{SUMMARY_URL_RE}[^'"]*['"][^>]*>[\s\S]*?</a>
+    [\s\S]{{0,1200}}?
+    <a\b[^>]*href=['"][^'"]*{TERMS_URL_RE}[^'"]*['"][^>]*>[\s\S]*?</a>
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
@@ -1645,12 +1715,13 @@ def cleanup_after_replacement(html_text: str, official_html: str) -> str:
 
     return html_text.strip()
 
-def replace_tou_block(license_html: str, official_html: str):
+def replace_tou_block(license_html: str, official_html: str, strict_match: bool = False):
     """Replace one or more ToU blocks while preserving surrounding text/html.
     
     PARAMS
     license_html: the original licenseInfo HTML text to search within
     official_html: the canonical ToU block HTML to replace with
+    strict_match: if True, require the stricter canonical link structure before replacing
     
     RETURNS
     updated_html: the HTML text after replacement
@@ -1659,14 +1730,15 @@ def replace_tou_block(license_html: str, official_html: str):
     if not license_html:
         return license_html, 0
 
-    updated, n_block = TOU_BLOCK_RE.subn(official_html, license_html)
+    matcher = STRICT_TOU_BLOCK_RE if strict_match else TOU_BLOCK_RE
+    updated, n_block = matcher.subn(official_html, license_html)
 
     if n_block:
         updated = cleanup_after_replacement(updated, official_html)
 
     return updated, n_block
 
-def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=140):
+def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=140, strict_match=False):
     """
     Build a dry-run table with old/new licenseInfo and update flags.
     No AGO updates happen here.
@@ -1675,6 +1747,7 @@ def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=1
     matches_df: DataFrame of items to consider for update, must contain columns for item_id, title, owner, type, matched_terms, and licenseInfo
     replacement_tou: the new block of HTML that will replace the matching block 
     max_preview_len: maximum number of characters to include in the old/new preview columns (default 140)
+    strict_match: if True, only replace canonical Esri ToU blocks that satisfy the stricter matcher
 
     RETURNS
     plan_df: DataFrame with columns for item_id, title, owner, type, matched_terms, replacements_found, will_update, old_preview, new_preview, old_licenseInfo, new_licenseInfo
@@ -1687,7 +1760,7 @@ def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=1
     rows = []
     for _, row in matches_df.iterrows():
         old_license = row.get("licenseInfo") or ""
-        new_license, replacements_found = replace_tou_block(old_license, replacement_tou)
+        new_license, replacements_found = replace_tou_block(old_license, replacement_tou, strict_match=strict_match)
         will_update = (old_license != new_license)
 
         rows.append({
@@ -2097,8 +2170,9 @@ def apply_updates_btn(_button):
             f"{count_phrase(len(update_errors_df), 'error')}"
         )
         if not success_df.empty:
-            print("Showing the first 3 edit results:")
-            display(success_df.head(3))
+            sample_count = min(len(success_df), 3)
+            print(f"Showing {count_phrase(sample_count, 'sample edit result')}:")
+            display(success_df.head(sample_count))
         else:
             print("No successful updates to display.")
 
