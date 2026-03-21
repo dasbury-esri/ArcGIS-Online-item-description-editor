@@ -1,5 +1,5 @@
 # ======================================================================
-# Helper functions for AGO Item Description Editor notebook
+# Helper functions for AGO Item Details Editor notebook
 # ======================================================================
 
 import os, sys, re, uuid, json, math, tempfile, requests, traceback, base64, ast, csv, io, threading
@@ -141,7 +141,7 @@ def build_notebook_file_link(path, label, as_button=False):
     return f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer">{safe_label}</a>'
 
 
-def display_embedded_html_report(report_path, *, height_px=760, output_widget=None):
+def display_embedded_html_report(report_path, *, height_px=760, output_widget=None, max_inline_bytes=2 * 1024 * 1024):
     """Render a generated HTML report inline in the notebook output area.
 
     Falls back gracefully when the report file cannot be read.
@@ -161,6 +161,20 @@ def display_embedded_html_report(report_path, *, height_px=760, output_widget=No
             output_widget.append_stdout(f"Could not read report for inline display: {exc}\n")
         else:
             print(f"Could not read report for inline display: {exc}")
+        return False
+
+    report_size_bytes = len(report_html.encode("utf-8"))
+    if max_inline_bytes is not None and report_size_bytes > int(max_inline_bytes):
+        if output_widget is not None:
+            output_widget.append_stdout(
+                "Inline preview skipped because the report is too large "
+                f"({report_size_bytes / (1024 * 1024):.2f} MB > {int(max_inline_bytes) / (1024 * 1024):.2f} MB limit).\n"
+            )
+        else:
+            print(
+                "Inline preview skipped because the report is too large "
+                f"({report_size_bytes / (1024 * 1024):.2f} MB > {int(max_inline_bytes) / (1024 * 1024):.2f} MB limit)."
+            )
         return False
 
     encoded = base64.b64encode(report_html.encode("utf-8")).decode("ascii")
@@ -1185,26 +1199,49 @@ def save_scan_outputs_btn(button):
         output3.append_stdout("Run Step 2 or Step 4 to load saved scan files first.\n")
         return
 
-    matches_path = resolve_output_path(
-        input3_matches.value if input3_matches is not None else None,
-        "scan_matches.csv",
-    )
-    errors_path = resolve_output_path(
-        input3_errors.value if input3_errors is not None else None,
-        "scan_errors.csv",
-    )
-    all_items_path = resolve_output_path(
-        input3_all_items.value if input3_all_items is not None else None,
-        "scan_all_items.csv",
-    )
+    export_targets = []
+    skipped_targets = []
 
-    matches_df.to_csv(matches_path, index=False)
-    errors_df.to_csv(errors_path, index=False)
-    all_items_df.to_csv(all_items_path, index=False)
+    if not matches_df.empty:
+        matches_path = resolve_output_path(
+            input3_matches.value if input3_matches is not None else None,
+            "scan_matches.csv",
+        )
+        export_targets.append(("Matches CSV", matches_df, matches_path))
+    else:
+        skipped_targets.append("Matches CSV")
+
+    if not errors_df.empty:
+        errors_path = resolve_output_path(
+            input3_errors.value if input3_errors is not None else None,
+            "scan_errors.csv",
+        )
+        export_targets.append(("Errors CSV", errors_df, errors_path))
+    else:
+        skipped_targets.append("Errors CSV")
+
+    if not all_items_df.empty:
+        all_items_path = resolve_output_path(
+            input3_all_items.value if input3_all_items is not None else None,
+            "scan_all_items.csv",
+        )
+        export_targets.append(("All items CSV", all_items_df, all_items_path))
+    else:
+        skipped_targets.append("All items CSV")
+
+    if not export_targets:
+        output3.append_stdout("Nothing to export. All scan output tables are empty.\n")
+        return
+
     output3.append_stdout("Saved files:\n")
-    output3.append_stdout(f"- {matches_path}\n")
-    output3.append_stdout(f"- {errors_path}\n")
-    output3.append_stdout(f"- {all_items_path}\n")
+    for _label, dataframe, target_path in export_targets:
+        dataframe.to_csv(target_path, index=False)
+        output3.append_stdout(f"- {target_path}\n")
+
+    if skipped_targets:
+        output3.append_stdout("Skipped empty outputs:\n")
+        for label in skipped_targets:
+            output3.append_stdout(f"- {label}\n")
 
 
 def save_secondary_scan_outputs_btn(button):
@@ -1281,7 +1318,7 @@ def create_report_btn(_button):
     output10.clear_output()
     plan_df = context.get("plan_df")
     if plan_df is None:
-        output10.append_stdout("Build the dry-run plan before creating the report.\n")
+        output10.append_stdout("Do a dry-run before creating the report.\n")
         return
 
     report_filename = "dry_run_report.html"
@@ -1305,10 +1342,21 @@ def create_report_btn(_button):
     )
     context["report_path"] = report_path
     output10.append_stdout(f"Report saved to: {report_path}\n")
-    embedded = display_embedded_html_report(report_path, height_px=760, output_widget=output10)
+    embedded = display_embedded_html_report(
+        report_path,
+        height_px=760,
+        output_widget=output10,
+        max_inline_bytes=2 * 1024 * 1024,
+    )
     if not embedded:
-        output10.append_stdout("Inline report preview unavailable; use the browser link below.\n")
-    output10.append_display_data(HTML(f"<div style=\"margin-top:8px;\">{build_notebook_file_link(report_path, 'Open report in browser (unavailable in ArcGIS Online)', as_button=True)}</div>"))
+        output10.append_stdout("Inline report preview unavailable.\n")
+
+    if current_env != "arcgisnotebook":
+        output10.append_display_data(HTML(f"<div style=\"margin-top:8px;\">{build_notebook_file_link(report_path, 'Open report', as_button=True)}</div>"))
+    else:
+        output10.append_stdout(
+            "In ArcGIS Online, open the saved HTML report from the Files panel rather than from an output-cell button.\n"
+        )
     output10.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
     output10.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 11.\n")
     output10.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
@@ -1380,20 +1428,40 @@ def export_final_results_btn(_button):
         output12.append_stdout("Run Step 11 first to create the export data.\n")
         return
 
-    success_path = resolve_output_path(
-        input12_success_csv.value if input12_success_csv is not None else None,
-        "update_successes.csv",
-    )
-    errors_path = resolve_output_path(
-        input12_errors_csv.value if input12_errors_csv is not None else None,
-        "update_errors.csv",
-    )
+    export_targets = []
+    skipped_targets = []
 
-    success_df.to_csv(success_path, index=False)
-    update_errors_df.to_csv(errors_path, index=False)
+    if not success_df.empty:
+        success_path = resolve_output_path(
+            input12_success_csv.value if input12_success_csv is not None else None,
+            "update_successes.csv",
+        )
+        export_targets.append(("Success CSV", success_df, success_path))
+    else:
+        skipped_targets.append("Success CSV")
+
+    if not update_errors_df.empty:
+        errors_path = resolve_output_path(
+            input12_errors_csv.value if input12_errors_csv is not None else None,
+            "update_errors.csv",
+        )
+        export_targets.append(("Errors CSV", update_errors_df, errors_path))
+    else:
+        skipped_targets.append("Errors CSV")
+
+    if not export_targets:
+        output12.append_stdout("Nothing to export. Both final result tables are empty.\n")
+        return
+
     output12.append_stdout("Saved files:\n")
-    output12.append_stdout(f"- {success_path}\n")
-    output12.append_stdout(f"- {errors_path}\n")
+    for _label, dataframe, target_path in export_targets:
+        dataframe.to_csv(target_path, index=False)
+        output12.append_stdout(f"- {target_path}\n")
+
+    if skipped_targets:
+        output12.append_stdout("Skipped empty outputs:\n")
+        for label in skipped_targets:
+            output12.append_stdout(f"- {label}\n")
 
 # =====================================================================
 # Strict match filter
@@ -1742,7 +1810,7 @@ def build_side_by_side_report(
                         <details><summary>Old source</summary><pre>{escape(old_html)}</pre></details>
                     </td>
                     <td class="select-cell">
-                        <input type="checkbox" class="row-check" data-item-id="{escape(item_id)}" checked>
+                        <input type="checkbox" class="row-check" data-item-id="{escape(item_id)}">
                     </td>
                     <td>
                         <iframe class="pane" sandbox srcdoc="{new_srcdoc}"></iframe>
@@ -1813,7 +1881,7 @@ def build_side_by_side_report(
                         <tr>
                             <th>Item</th>
                             <th>Old</th>
-                            <th class="select-head"><input type="checkbox" id="toggleAll" checked></th>
+                            <th class="select-head"><input type="checkbox" id="toggleAll"></th>
                             <th>New</th>
                         </tr>
                     </thead>
@@ -1963,14 +2031,17 @@ def apply_updates_btn(_button):
 
     output11.clear_output()
     if context.get("gis") is None:
-        output11.append_stdout("Please run Step 1: Setup and authenticate first.\n")
+        with output11:
+            print("Please run Step 1: Setup and authenticate first.")
         return
 
     plan_df = context.get("plan_df")
     if plan_df is None:
-        output11.append_stdout("Build the dry-run plan first.\n")
+        with output11:
+            print("Build the dry-run plan first.")
         return
 
+    messages = []
     selected_item_ids = context.get("selected_item_ids_for_update")
     selected_path = context.get("selected_item_ids_for_update_path")
 
@@ -1987,21 +2058,27 @@ def apply_updates_btn(_button):
                     if "item_id" in selected_df.columns:
                         selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
                 if selected_item_ids is not None:
-                    output11.append_stdout(
+                    messages.append(
                         f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
-                        f"from {selected_path}\n"
+                        f"from {selected_path}"
                     )
             except Exception as exc:
-                output11.append_stdout(f"Could not load selected IDs file ({selected_path}): {exc}\n")
-                output11.append_stdout("Continuing without a selection filter.\n")
+                messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
+                messages.append("Continuing without a selection filter.")
                 selected_item_ids = None
         else:
-            output11.append_stdout("No selected IDs file was found. Applying updates to all rows where will_update=True.\n")
+            messages.append("No selected IDs file was found. Applying updates to all rows where will_update=True.")
     elif selected_path is not None:
-        output11.append_stdout(
+        messages.append(
             f"Using preloaded selection from {selected_path} "
-            f"({count_phrase(len(selected_item_ids), 'item ID', 'item IDs')}).\n"
+            f"({count_phrase(len(selected_item_ids), 'item ID', 'item IDs')})."
         )
+
+    with output11:
+        print("Execute update summary")
+        for line in messages:
+            print(f"- {line}")
+        print("Applying updates now...")
 
     with redirect_stdout(_OutputWidgetStdoutProxy(output11)):
         success_df, update_errors_df = apply_licenseinfo_updates(
@@ -2014,11 +2091,16 @@ def apply_updates_btn(_button):
         )
     context["success_df"] = success_df
     context["update_errors_df"] = update_errors_df
-    if not success_df.empty:
-        output11.append_stdout(f"Showing the first 3 edit results:\n")
-        output11.append_display_data(success_df.head(3))
-    else:
-        output11.append_stdout("No successful updates to display.\n")
+    with output11:
+        print(
+            f"Update attempt complete: {count_phrase(len(success_df), 'success')} | "
+            f"{count_phrase(len(update_errors_df), 'error')}"
+        )
+        if not success_df.empty:
+            print("Showing the first 3 edit results:")
+            display(success_df.head(3))
+        else:
+            print("No successful updates to display.")
 
 
 def load_update_selection_btn(_button):
@@ -2031,14 +2113,17 @@ def load_update_selection_btn(_button):
 
     output11.clear_output()
     if context.get("gis") is None:
-        output11.append_stdout("Please run Step 1: Setup and authenticate first.\n")
+        with output11:
+            print("Please run Step 1: Setup and authenticate first.")
         return
 
     plan_df = context.get("plan_df")
     if plan_df is None:
-        output11.append_stdout("Build the dry-run plan first.\n")
+        with output11:
+            print("Build the dry-run plan first.")
         return
 
+    messages = []
     selected_item_ids = None
     selected_path = resolve_existing_input_path(input11_ids.value)
     if selected_path is not None:
@@ -2051,34 +2136,42 @@ def load_update_selection_btn(_button):
                     selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
 
             if selected_item_ids is not None:
-                output11.append_stdout(
+                messages.append(
                     f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
-                    f"from {selected_path}\n"
+                    f"from {selected_path}"
                 )
         except Exception as exc:
-            output11.append_stdout(f"Could not load selected IDs file ({selected_path}): {exc}\n")
-            output11.append_stdout("Continuing without a selection filter.\n")
+            messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
+            messages.append("Continuing without a selection filter.")
             selected_item_ids = None
     else:
-        output11.append_stdout("No selected IDs file was found. Applying updates to all rows where will_update=True.\n")
+        messages.append("No selected IDs file was found. Applying updates to all candidate items.")
 
     to_update = plan_df[plan_df["will_update"] == True].copy()
+    initial_count = len(to_update)
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        output11.append_stdout(f"Selection filter applied. {count_phrase(len(to_update), 'row')} selected for update.\n")
+        messages.append(f"Selection filter applied. {count_phrase(len(to_update), 'row')} selected for update.")
 
     context["selected_item_ids_for_update"] = selected_item_ids
     context["selected_item_ids_for_update_path"] = str(selected_path) if selected_path is not None else None
 
-    if to_update.empty:
-        output11.append_stdout("Nothing to update.\n")
-        return
+    with output11:
+        print("Precheck summary")
+        for line in messages:
+            print(f"- {line}")
 
-    output11.append_stdout(f"WARNING: You are about to update {count_phrase(len(to_update), 'item')}.\n")
-    output11.append_stdout("Type APPLY UPDATES in the confirmation field, then click Execute update.\n")
-    output11.append_stdout("Preview of the first 3 rows to be updated:\n")
-    output11.append_display_data(to_update[["item_id", "title", "owner", "type"]].head(3))
+        if to_update.empty:
+            print("Nothing to update.")
+            return
+
+        print(f"WARNING: You are about to edit {count_phrase(len(to_update), 'item')}.")
+        print("Type APPLY UPDATES in the confirmation field, then click Execute update.")
+        print("Basic details of the first several rows to be updated:")
+        preview = to_update[["item_id", "title", "owner", "type"]].head(3).reset_index(drop=True)
+        preview.index += 1
+        display(preview)
 
 # Function to apply the updates to AGO items. Accidental execution of this function is protected by a required input phrase "APPLY UPDATES"
 def apply_licenseinfo_updates(

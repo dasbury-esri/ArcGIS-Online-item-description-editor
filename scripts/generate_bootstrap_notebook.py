@@ -8,10 +8,10 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_NOTEBOOK = REPO_ROOT / "AGO_Item_Description_Editor.ipynb"
+SOURCE_NOTEBOOK = REPO_ROOT / "AGO_Item_Details_Editor.ipynb"
 HELPER_FILE = REPO_ROOT / "helper_functions.py"
 TOU_FILE = REPO_ROOT / "Esri_ToU.html"
-OUTPUT_NOTEBOOK = REPO_ROOT / "Bulk editor for ArcGIS Online Item Description pages.ipynb"
+OUTPUT_NOTEBOOK = REPO_ROOT / "Bulk editor for ArcGIS Online Item Details pages.ipynb"
 
 
 def _load_notebook(path: Path) -> dict:
@@ -81,7 +81,40 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
 
 
 def _update_intro_markdown(cells: list[dict]) -> None:
-    cells[0]["source"] = ["# Bulk editor for ArcGIS Online Item Description pages"]
+    cells[0]["source"] = ["# Bulk editor for ArcGIS Online Item Details pages"]
+    cells[1]["source"] = [
+        "**Welcome!**  ",
+        "",
+        "This notebook helps you scan, review, and update ArcGIS Online items at scale. It focuses on the Terms of Use section, stored in the `licenseInfo` field, and looks for text or HTML that you may want to replace.",
+        "",
+        "This version bundles `helper_functions.py` and `Esri_ToU.html` template directly into the notebook, so when running Step 1 those files will be expanded into a new folder and saved into `/arcgis/home/notebook_outputs`. You will be able to modify both input and output files as you progress. A review webpage is produced that lets you see what will change before you make any edits, and you can selectively choose to edit items from the report.",
+        "",
+        "*** BE CAUTIOUS WITH ANY TOOL LIKE THIS THAT BULK EDITS ITEMS *** However, you will have plenty of chances to review the work before commiting any changes.",
+        "",
+        "**Where this notebook can run**  ",
+        "- ArcGIS Online Notebook (JupyterLab-style).",
+        "- VS Code on macOS with a local Jupyter kernel.",
+        "- VS Code on Windows with a local Jupyter kernel.",
+        "",
+        "**How to use this notebook**  ",
+        " - Click on the text \"Setup and authenticate\" below. ",
+        " - There are two types of cells, Markdown (formatted notes) and Code.",
+        " - An indicator -- typically a vertical blue line -- should highlight that you have selected the \"Setup and authenticate\" Markdown cell.",
+        " - Once selected, click the \"Play\" button in the toolbar above to run the cell and advance to the next Code cell.",
+        " - Click the \"Play\" button a second time to run the code cell.",
+        " - After several seconds a \"Setup Notebook\" button should appear. Click the button to begin setup and authentication.",
+        " - After each cell completes, click the text within the following Markdown cell.",
+        " - Click the \"Play\" button to advance to the Code cell, then click the \"Play\" button a second time to make a button appear.",
+        " - Click the button to run the code in the cell. ",
+        "",
+        "**Notes**  ",
+        "- Organization-wide scans can take time, especially in large orgs, so progress messages are shown as users are processed.",
+        "- You can monitor the status of long running cells by viewing the small circle in the top right of the page.",
+        "- If you click on a code cell it will expand showing you the behind-the-scenes Python code.",
+        "- For a cleaner interface select View > Collapse All Code in the menu bar above to hide the code .",
+        "- If at any point you get stuck and want to start over, just click Kernel > Restart Kernel and Clear Outputs of All Cells... in the menu bar",
+        "- The workflow is designed to be safe by default: review first, then update.",
+    ]
     cells[4]["source"] = [
         "## 1. Setup and authenticate",
         "Write the bundled helper files into the runtime, then initialize the notebook environment and connect to ArcGIS Online.",

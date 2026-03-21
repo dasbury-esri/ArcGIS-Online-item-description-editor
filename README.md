@@ -1,13 +1,13 @@
-# ArcGIS Online Item Description Editor
+# ArcGIS Online Item Details Editor
 
-This repository contains an ArcGIS Online notebook workflow for scanning, reviewing, and updating the Terms of Use section of ArcGIS Online item description pages at scale.
+This repository contains an ArcGIS Online notebook workflow for scanning, reviewing, and updating the Terms of Use section of ArcGIS Online item details pages at scale.
 
 The workflow is designed to help identify outdated or unwanted text and HTML in the `licenseInfo` field, review proposed replacements safely, and apply updates only after confirmation.
 
 ## Which Notebook To Use
 
-- `AGO_Item_Description_Editor.ipynb`: source notebook for development and maintenance
-- `Bulk editor for ArcGIS Online Item Description pages.ipynb`: portable notebook for sharing with other users; it bootstraps `helper_functions.py` and `Esri_ToU.html` automatically during Step 1
+- `AGO_Item_Details_Editor.ipynb`: source notebook for development and maintenance
+- `Bulk editor for ArcGIS Online Item Details pages.ipynb`: portable notebook for sharing with other users; it bootstraps `helper_functions.py` and `Esri_ToU.html` automatically during Step 1
 
 Use the source notebook when you are editing logic, refining UX, or updating the workflow.
 
@@ -17,8 +17,8 @@ Use the portable notebook when you want a single file that can be shared and run
 
 ## Repository Contents
 
-- `AGO_Item_Description_Editor.ipynb`: source notebook
-- `Bulk editor for ArcGIS Online Item Description pages.ipynb`: generated portable notebook
+- `AGO_Item_Details_Editor.ipynb`: source notebook
+- `Bulk editor for ArcGIS Online Item Details pages.ipynb`: generated portable notebook
 - `helper_functions.py`: shared helper functions used by the source notebook
 - `Esri_ToU.html`: canonical replacement HTML used by the dry-run and update steps
 - `scripts/generate_bootstrap_notebook.py`: generator script for rebuilding the portable notebook from the source files
@@ -48,7 +48,7 @@ If you update the source notebook, helper module, or canonical HTML file, regene
 python scripts/generate_bootstrap_notebook.py
 ```
 
-This rebuilds `Bulk editor for ArcGIS Online Item Description pages.ipynb` from the current repo state.
+This rebuilds `Bulk editor for ArcGIS Online Item Details pages.ipynb` from the current repo state.
 
 ## Notes
 
