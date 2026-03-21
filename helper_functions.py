@@ -203,6 +203,16 @@ def count_phrase(count, singular, plural=None):
         noun = f"{singular}s"
     return f"{count} {noun}"
 
+
+def _empty_output_message(label):
+    messages = {
+        "Matches CSV": "0 matches found.",
+        "Errors CSV": "0 reported errors.",
+        "All items CSV": "0 all-items rows available.",
+        "Success CSV": "0 successful updates.",
+    }
+    return messages.get(label, f"{label}: 0 rows.")
+
 # ======================================================================
 # Authentication for different environments
 # ======================================================================
@@ -454,6 +464,12 @@ class _OutputWidgetStdoutProxy:
         return None
 
 
+def _invoke_context_callback(context, callback_key):
+    callback = context.get(callback_key)
+    if callable(callback):
+        callback()
+
+
 def bind_primary_scan_with_cancel(
     button,
     status_key="status2",
@@ -512,6 +528,7 @@ def bind_primary_scan_with_cancel(
 
             if status_widget is not None:
                 status_widget.value = "<span style='color:#2e7d32;'>Scan complete.</span>"
+            _invoke_context_callback(context, "refresh_scan_save_ui")
         except ScanCancelled:
             output_widget.append_stdout("\nScan canceled by user.\n")
             if status_widget is not None:
@@ -1193,6 +1210,7 @@ def run_secondary_scan_btn(button):
         output5.append_display_data(new_matches_df.head(sample_count))
     else:
         output5.append_stdout("No sample matches to display.\n")
+    _invoke_context_callback(context, "refresh_secondary_save_ui")
 
 # =====================================================================
 # File handling
@@ -1212,7 +1230,7 @@ def save_scan_outputs_btn(button):
     errors_df = context.get("errors_df")
     all_items_df = context.get("all_items_df")
     if matches_df is None or errors_df is None or all_items_df is None:
-        output3.append_stdout("Run Step 2 or Step 4 to load saved scan files first.\n")
+        output3.append_stdout("Run Step 2 or Step 3 to load saved scan files first.\n")
         return
 
     export_targets = []
@@ -1255,9 +1273,8 @@ def save_scan_outputs_btn(button):
         output3.append_stdout(f"- {target_path}\n")
 
     if skipped_targets:
-        output3.append_stdout("Skipped empty outputs:\n")
         for label in skipped_targets:
-            output3.append_stdout(f"- {label}\n")
+            output3.append_stdout(f"{_empty_output_message(label)}\n")
 
 
 def save_secondary_scan_outputs_btn(button):
@@ -1274,29 +1291,51 @@ def save_secondary_scan_outputs_btn(button):
     errors_df = context.get("new_errors_df")
     all_items_df = context.get("new_all_items_df")
     if matches_df is None or errors_df is None or all_items_df is None:
-        output6.append_stdout("Run Step 5 secondary scan first.\n")
-        return {"status": "warning", "message": "Secondary save skipped. Run Step 5 first."}
+        output6.append_stdout("Run Step 4 secondary scan first.\n")
+        return {"status": "warning", "message": "Secondary save skipped. Run Step 4 first."}
 
-    matches_path = resolve_output_path(
-        input6_secondary_matches.value if input6_secondary_matches is not None else None,
-        "secondary_scan_matches.csv",
-    )
-    errors_path = resolve_output_path(
-        input6_secondary_errors.value if input6_secondary_errors is not None else None,
-        "secondary_scan_errors.csv",
-    )
-    all_items_path = resolve_output_path(
-        input6_secondary_all_items.value if input6_secondary_all_items is not None else None,
-        "secondary_scan_all_items.csv",
-    )
+    export_targets = []
+    skipped_targets = []
 
-    matches_df.to_csv(matches_path, index=False)
-    errors_df.to_csv(errors_path, index=False)
-    all_items_df.to_csv(all_items_path, index=False)
+    if not matches_df.empty:
+        matches_path = resolve_output_path(
+            input6_secondary_matches.value if input6_secondary_matches is not None else None,
+            "secondary_scan_matches.csv",
+        )
+        export_targets.append(("Matches CSV", matches_df, matches_path))
+    else:
+        skipped_targets.append("Matches CSV")
+
+    if not errors_df.empty:
+        errors_path = resolve_output_path(
+            input6_secondary_errors.value if input6_secondary_errors is not None else None,
+            "secondary_scan_errors.csv",
+        )
+        export_targets.append(("Errors CSV", errors_df, errors_path))
+    else:
+        skipped_targets.append("Errors CSV")
+
+    if not all_items_df.empty:
+        all_items_path = resolve_output_path(
+            input6_secondary_all_items.value if input6_secondary_all_items is not None else None,
+            "secondary_scan_all_items.csv",
+        )
+        export_targets.append(("All items CSV", all_items_df, all_items_path))
+    else:
+        skipped_targets.append("All items CSV")
+
+    if not export_targets:
+        output6.append_stdout("Nothing to export. All secondary scan output tables are empty.\n")
+        return {"status": "warning", "message": "Secondary save skipped. No secondary rows to export."}
+
     output6.append_stdout("Saved files:\n")
-    output6.append_stdout(f"- {matches_path}\n")
-    output6.append_stdout(f"- {errors_path}\n")
-    output6.append_stdout(f"- {all_items_path}\n")
+    for _label, dataframe, target_path in export_targets:
+        dataframe.to_csv(target_path, index=False)
+        output6.append_stdout(f"- {target_path}\n")
+
+    if skipped_targets:
+        for label in skipped_targets:
+            output6.append_stdout(f"{_empty_output_message(label)}\n")
 
 def export_dry_run_btn(_button):
     context = _ctx()
@@ -1391,7 +1430,7 @@ def create_report_btn(_button):
             "In ArcGIS Online, open the saved HTML report from the Files panel rather than from an output-cell button.\n"
         )
     output10.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
-    output10.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 11.\n")
+    output10.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 8.\n")
     output10.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
@@ -1401,7 +1440,7 @@ def load_previous_scan_btn(_button):
     input4_errors = context.get("input4_errors")
     input4_all_items = context.get("input4_all_items")
     if output4 is None or input4_matches is None or input4_errors is None or input4_all_items is None:
-        raise RuntimeError("Step 4 inputs and output must be configured.")
+        raise RuntimeError("Step 3 inputs and output must be configured.")
 
     output4.clear_output()
 
@@ -1434,6 +1473,7 @@ def load_previous_scan_btn(_button):
         f"errors={len(context['errors_df'])}, "
         f"all_items={len(context['all_items_df'])}\n"
     )
+    _invoke_context_callback(context, "refresh_scan_save_ui")
 
 
 def run_dry_run_with_file_btn(_button):
@@ -1458,7 +1498,7 @@ def export_final_results_btn(_button):
     success_df = context.get("success_df")
     update_errors_df = context.get("update_errors_df")
     if success_df is None or update_errors_df is None:
-        output12.append_stdout("Run Step 11 first to create the export data.\n")
+        output12.append_stdout("Run Step 8 first to create the export data.\n")
         return
 
     export_targets = []
@@ -1492,9 +1532,8 @@ def export_final_results_btn(_button):
         output12.append_stdout(f"- {target_path}\n")
 
     if skipped_targets:
-        output12.append_stdout("Skipped empty outputs:\n")
         for label in skipped_targets:
-            output12.append_stdout(f"- {label}\n")
+            output12.append_stdout(f"{_empty_output_message(label)}\n")
 
 # =====================================================================
 # Strict match filter
@@ -1580,6 +1619,7 @@ def dry_run_btn(_button):
         output8.append_display_data(dry_run_table.head(sample_count))
     else:
         output8.append_stdout("No dry-run rows to display.\n")
+    _invoke_context_callback(context, "refresh_dry_run_export_ui")
 
 # Canonical replacement block source file (overridable from notebook UI).
 OFFICIAL_TOU_HTML_FILE = "/Users/davi6569/Documents/GitHub/AGO-item-description-editor/Esri_ToU.html"
@@ -2178,12 +2218,12 @@ def apply_updates_btn(_button):
 
 
 def load_update_selection_btn(_button):
-    """Step 11 precheck: load selection file and preview update count before execute."""
+    """Step 8 precheck: load selection file and preview update count before execute."""
     context = _ctx()
     output11 = context.get("output11")
     input11_ids = context.get("input11_ids")
     if output11 is None or input11_ids is None:
-        raise RuntimeError("Step 11 selection input and output must be configured.")
+        raise RuntimeError("Step 8 selection input and output must be configured.")
 
     output11.clear_output()
     if context.get("gis") is None:
