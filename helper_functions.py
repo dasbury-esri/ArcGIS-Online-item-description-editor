@@ -1200,11 +1200,8 @@ def save_scan_outputs_btn(button):
     context = _ctx()
     save_scan_output = context.get("save_scan_output")
     scan_results_path_input = context.get("scan_results_path_input")
-    if scan_results_path_input is None:
-        # Backward compatibility with earlier notebook wiring.
-        scan_results_path_input = context.get("scan_matches_path_input")
-    if save_scan_output is None:
-        raise RuntimeError("context['save_scan_output'] is not configured.")
+    if save_scan_output is None or scan_results_path_input is None:
+        raise RuntimeError("Step 2 save-scan widgets are not fully configured.")
 
     save_scan_output.clear_output()
     matches_df = context.get("matches_df")
@@ -1220,7 +1217,7 @@ def save_scan_outputs_btn(button):
         return
 
     combined_path = resolve_output_path(
-        scan_results_path_input.value if scan_results_path_input is not None else None,
+        scan_results_path_input.value,
         "scan_results.csv",
     )
     combined_scan_df.to_csv(combined_path, index=False)
@@ -1400,96 +1397,54 @@ def load_previous_scan_btn(_button):
     context = _ctx()
     reload_scan_output = context.get("reload_scan_output")
     reload_scan_results_path_input = context.get("reload_scan_results_path_input")
-    reload_matches_path_input = context.get("reload_matches_path_input")
-    reload_errors_path_input = context.get("reload_errors_path_input")
-    reload_all_items_path_input = context.get("reload_all_items_path_input")
-    has_combined_input = reload_scan_results_path_input is not None
-    has_legacy_inputs = (
-        reload_matches_path_input is not None
-        and reload_errors_path_input is not None
-        and reload_all_items_path_input is not None
-    )
-    if reload_scan_output is None or (not has_combined_input and not has_legacy_inputs):
+    if reload_scan_output is None or reload_scan_results_path_input is None:
         raise RuntimeError("Step 3 inputs and output must be configured.")
 
     reload_scan_output.clear_output()
 
-    if has_combined_input:
-        combined_path = (reload_scan_results_path_input.value or "").strip()
-        if not combined_path or not Path(combined_path).exists():
-            reload_scan_output.append_stdout(f"Combined scan file not found: {combined_path}\n")
-            return
+    combined_path = (reload_scan_results_path_input.value or "").strip()
+    if not combined_path or not Path(combined_path).exists():
+        reload_scan_output.append_stdout(f"Combined scan file not found: {combined_path}\n")
+        return
 
-        combined_df = pd.read_csv(combined_path, dtype={"item_id": str})
-        status_series = combined_df.get("status")
-        if status_series is None:
-            reload_scan_output.append_stdout(
-                "Combined scan file is missing required 'status' column. Use legacy reload fields or provide a valid combined file.\n"
-            )
-            return
-
-        matches_df = combined_df[status_series == "match"].copy()
-        errors_df = combined_df[status_series == "scan_error"].copy()
-        all_items_df = combined_df[status_series == "scanned_item"].copy()
-
-        expected_match_cols = [
-            "item_id", "title", "owner", "type", "access", "licenseInfo",
-            "matched_terms", "public_url", "portal_url", "thumbnail", "review_url",
-        ]
-        expected_error_cols = ["username", "error"]
-        expected_all_item_cols = [
-            "item_id", "title", "owner", "type", "access", "licenseInfo",
-            "public_url", "portal_url", "thumbnail",
-        ]
-
-        for col in expected_match_cols:
-            if col not in matches_df.columns:
-                matches_df[col] = ""
-        for col in expected_error_cols:
-            if col not in errors_df.columns:
-                errors_df[col] = ""
-        for col in expected_all_item_cols:
-            if col not in all_items_df.columns:
-                all_items_df[col] = ""
-
-        context["matches_df"] = matches_df[expected_match_cols]
-        context["errors_df"] = errors_df[expected_error_cols]
-        context["all_items_df"] = all_items_df[expected_all_item_cols]
-
+    combined_df = pd.read_csv(combined_path, dtype={"item_id": str})
+    status_series = combined_df.get("status")
+    if status_series is None:
         reload_scan_output.append_stdout(
-            f"Reloaded from combined file: matches={len(context['matches_df'])}, "
-            f"errors={len(context['errors_df'])}, "
-            f"all_items={len(context['all_items_df'])}\n"
+            "Combined scan file is missing required 'status' column.\n"
         )
-        _invoke_context_callback(context, "refresh_scan_save_ui")
         return
 
-    matches_path = (reload_matches_path_input.value or "").strip()
-    errors_path = (reload_errors_path_input.value or "").strip()
-    all_items_path = (reload_all_items_path_input.value or "").strip()
+    matches_df = combined_df[status_series == "match"].copy()
+    errors_df = combined_df[status_series == "scan_error"].copy()
+    all_items_df = combined_df[status_series == "scanned_item"].copy()
 
-    if not matches_path or not Path(matches_path).exists():
-        reload_scan_output.append_stdout(f"Matches file not found: {matches_path}\n")
-        return
-    if not all_items_path or not Path(all_items_path).exists():
-        reload_scan_output.append_stdout(f"All-items file not found: {all_items_path}\n")
-        return
+    expected_match_cols = [
+        "item_id", "title", "owner", "type", "access", "licenseInfo",
+        "matched_terms", "public_url", "portal_url", "thumbnail", "review_url",
+    ]
+    expected_error_cols = ["username", "error"]
+    expected_all_item_cols = [
+        "item_id", "title", "owner", "type", "access", "licenseInfo",
+        "public_url", "portal_url", "thumbnail",
+    ]
 
-    context["matches_df"] = pd.read_csv(matches_path, dtype={"item_id": str})
+    for col in expected_match_cols:
+        if col not in matches_df.columns:
+            matches_df[col] = ""
+    for col in expected_error_cols:
+        if col not in errors_df.columns:
+            errors_df[col] = ""
+    for col in expected_all_item_cols:
+        if col not in all_items_df.columns:
+            all_items_df[col] = ""
 
-    if errors_path and Path(errors_path).exists():
-        try:
-            context["errors_df"] = pd.read_csv(errors_path)
-        except pd.errors.EmptyDataError:
-            context["errors_df"] = pd.DataFrame(columns=["username", "error"])
-    else:
-        context["errors_df"] = pd.DataFrame(columns=["username", "error"])
-        reload_scan_output.append_stdout(f"Errors file not found or blank, using empty table: {errors_path}\n")
-
-    context["all_items_df"] = pd.read_csv(all_items_path, dtype={"item_id": str})
+    context["matches_df"] = matches_df[expected_match_cols]
+    context["errors_df"] = errors_df[expected_error_cols]
+    context["all_items_df"] = all_items_df[expected_all_item_cols]
 
     reload_scan_output.append_stdout(
-        f"Reloaded: matches={len(context['matches_df'])}, "
+        f"Reloaded from combined file: matches={len(context['matches_df'])}, "
         f"errors={len(context['errors_df'])}, "
         f"all_items={len(context['all_items_df'])}\n"
     )
@@ -1567,11 +1522,8 @@ def export_final_results_btn(_button):
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
     final_results_path_input = context.get("final_results_path_input")
-    if final_results_path_input is None:
-        # Backward compatibility with earlier notebook wiring.
-        final_results_path_input = context.get("edit_successes_path_input")
-    if export_final_results_output is None:
-        raise RuntimeError("context['export_final_results_output'] is not configured.")
+    if export_final_results_output is None or final_results_path_input is None:
+        raise RuntimeError("Step 8 final-export widgets are not fully configured.")
 
     export_final_results_output.clear_output()
     success_df = context.get("success_df")
@@ -1586,7 +1538,7 @@ def export_final_results_btn(_button):
         return
 
     combined_path = resolve_output_path(
-        final_results_path_input.value if final_results_path_input is not None else None,
+        final_results_path_input.value,
         "update_results.csv",
     )
     combined_results_df.to_csv(combined_path, index=False)
