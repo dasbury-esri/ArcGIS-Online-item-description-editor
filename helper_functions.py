@@ -1317,14 +1317,14 @@ def save_scan_outputs_btn(button):
     combined_scan_df.to_csv(combined_path, index=False)
 
     match_count = int((combined_scan_df["status"] == "match").sum())
-    scan_error_count = int((combined_scan_df["status"] == "scan_error").sum())
-    scanned_item_count = int((combined_scan_df["status"] == "scanned_item").sum())
+    error_count = int((combined_scan_df["status"] == "error").sum())
+    no_match_count = int((combined_scan_df["status"] == "no match").sum())
     save_scan_output.append_stdout(
         f"Saved file: {combined_path}\n"
         f"Rows exported: {len(combined_scan_df)} ("
         f"{count_phrase(match_count, 'match')}, "
-        f"{count_phrase(scan_error_count, 'scan error')}, "
-        f"{count_phrase(scanned_item_count, 'scanned item')})\n"
+        f"{count_phrase(no_match_count, 'no match')}, "
+        f"{count_phrase(error_count, 'error')})\n"
     )
 
 
@@ -1369,7 +1369,7 @@ def _build_combined_scan_results(matches_df, errors_df, all_items_df):
             errors_export["username"] = ""
         if "error" not in errors_export.columns:
             errors_export["error"] = ""
-        errors_export["status"] = "scan_error"
+        errors_export["status"] = "error"
 
     all_items_export = all_items_df.copy()
     if all_items_export.empty:
@@ -1378,7 +1378,7 @@ def _build_combined_scan_results(matches_df, errors_df, all_items_df):
         for col in ("item_id", "title", "owner", "type", "access", "licenseInfo", "public_url", "portal_url", "thumbnail"):
             if col not in all_items_export.columns:
                 all_items_export[col] = ""
-        all_items_export["status"] = "scanned_item"
+        all_items_export["status"] = "no match"
         all_items_export["error"] = ""
         all_items_export["matched_terms"] = ""
         all_items_export["review_url"] = all_items_export["public_url"].fillna(all_items_export["portal_url"])
@@ -1514,8 +1514,8 @@ def load_previous_scan_btn(_button):
         return
 
     matches_df = combined_df[status_series == "match"].copy()
-    errors_df = combined_df[status_series == "scan_error"].copy()
-    all_items_df = combined_df[status_series == "scanned_item"].copy()
+    errors_df = combined_df[status_series == "error"].copy()
+    all_items_df = combined_df[status_series == "no match"].copy()
 
     expected_match_cols = [
         "item_id", "title", "owner", "type", "access", "licenseInfo",
