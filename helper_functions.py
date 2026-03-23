@@ -1419,14 +1419,7 @@ def export_dry_run_btn(_button):
     dry_run_export_output.append_stdout(f"Saved file: {csv_path}\n")
 
 def create_report_btn(_button):
-    """Create and optionally embed the side-by-side dry-run review report.
-
-    PARAMS
-    _button: ipywidgets button event payload (unused)
-
-    RETURNS
-    None
-    """
+    """Create and optionally embed the side-by-side dry-run review report."""
     context = _ctx()
     create_report_output = context.get("create_report_output")
     report_path_input = context.get("report_path_input")
@@ -1498,14 +1491,7 @@ def create_report_btn(_button):
     create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
-    """Load scan results from a combined CSV and repopulate scan context tables.
-
-    PARAMS
-    _button: ipywidgets button event payload (unused)
-
-    RETURNS
-    None
-    """
+    """Load scan results from a combined CSV and repopulate scan context tables."""
     context = _ctx()
     reload_scan_output = context.get("reload_scan_output")
     reload_scan_results_path_input = context.get("reload_scan_results_path_input")
@@ -1704,14 +1690,7 @@ def _build_combined_update_results(success_df, update_errors_df):
 # =====================================================================
 
 def dry_run_btn(_button):
-    """Build the dry-run plan, display a summary, and refresh export controls.
-
-    PARAMS
-    _button: ipywidgets button event payload (unused)
-
-    RETURNS
-    None
-    """
+    """Build the dry-run plan, display a summary, and refresh export controls."""
     context = _ctx()
     dry_run_output = context.get("dry_run_output")
     if dry_run_output is None:
@@ -2268,14 +2247,7 @@ def build_side_by_side_report(
 # =====================================================================
 
 def apply_updates_btn(_button):
-    """Execute Step 6 update workflow using current plan and confirmation input.
-
-    PARAMS
-    _button: ipywidgets button event payload (unused)
-
-    RETURNS
-    None
-    """
+    """Execute Step 6 update workflow using current plan and confirmation input."""
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
@@ -2591,7 +2563,7 @@ def load_rollback_snapshot_btn(_button):
     rollback_output.clear_output()
     snapshot_path = resolve_existing_input_path(snapshot_path_input.value)
     if snapshot_path is None:
-        rollback_output.append_stdout("Rollback snapshot file not found. Run Step 6 first or provide a valid snapshot path.\n")
+        rollback_output.append_stdout("Snapshot file not found. Run Step 6 or provide a valid snapshot path.\n")
         return
 
     snapshot_df = pd.read_csv(snapshot_path, dtype={"item_id": str})
@@ -2603,7 +2575,7 @@ def load_rollback_snapshot_btn(_button):
 
     context["rollback_snapshot_df"] = snapshot_df
     context["rollback_snapshot_path"] = str(snapshot_path)
-    rollback_output.append_stdout(f"Loaded rollback snapshot rows: {len(snapshot_df)} from {snapshot_path}\n")
+    rollback_output.append_stdout(f"Snapshot loaded: {count_phrase(len(snapshot_df), 'row')} from {snapshot_path}\n")
 
 
 def preview_rollback_btn(_button):
@@ -2618,7 +2590,7 @@ def preview_rollback_btn(_button):
     rollback_output.clear_output()
     snapshot_df = context.get("rollback_snapshot_df")
     if snapshot_df is None or snapshot_df.empty:
-        rollback_output.append_stdout("No rollback snapshot is loaded. Run Step 6 first or load a snapshot file.\n")
+        rollback_output.append_stdout("No snapshot loaded. Load a snapshot before previewing rollback.\n")
         return
 
     manual_ids = parse_item_ids_text(rollback_ids_text_input.value if rollback_ids_text_input is not None else "")
@@ -2634,22 +2606,22 @@ def preview_rollback_btn(_button):
     if targeted_ids:
         rollback_plan_df = rollback_plan_df[rollback_plan_df["item_id"].astype(str).isin(targeted_ids)].copy()
         rollback_output.append_stdout(
-            f"Rollback target filter applied from manual/file IDs: {count_phrase(len(rollback_plan_df), 'row')} selected.\n"
+            f"Target filter applied: {count_phrase(len(rollback_plan_df), 'row')} selected for rollback.\n"
         )
     else:
-        rollback_output.append_stdout("No target IDs provided. Previewing rollback for all snapshot rows.\n")
+        rollback_output.append_stdout("No target IDs provided. Using all snapshot rows.\n")
 
     if file_path_used:
-        rollback_output.append_stdout(f"Loaded ID file: {file_path_used}\n")
+        rollback_output.append_stdout(f"ID file loaded: {file_path_used}\n")
 
     context["rollback_plan_df"] = rollback_plan_df
     context["rollback_target_item_ids"] = sorted(targeted_ids)
 
     if rollback_plan_df.empty:
-        rollback_output.append_stdout("Nothing to rollback for the selected criteria.\n")
+        rollback_output.append_stdout("No rows matched the selected rollback targets.\n")
         return
 
-    rollback_output.append_stdout(f"Rollback preview: {count_phrase(len(rollback_plan_df), 'row')} would be reverted.\n")
+    rollback_output.append_stdout(f"Preview summary: {count_phrase(len(rollback_plan_df), 'row')} would be reverted.\n")
     preview_cols = [c for c in ["item_id", "title", "owner", "type"] if c in rollback_plan_df.columns]
     if preview_cols:
         rollback_output.append_display_data(rollback_plan_df[preview_cols].head(3))
@@ -2670,12 +2642,12 @@ def execute_rollback_btn(_button):
 
     rollback_plan_df = context.get("rollback_plan_df")
     if rollback_plan_df is None or rollback_plan_df.empty:
-        rollback_output.append_stdout("No rollback plan is loaded. Click Preview rollback first.\n")
+        rollback_output.append_stdout("No rollback plan loaded. Click Preview rollback first.\n")
         return
 
     phrase = str(rollback_confirmation_input.value if rollback_confirmation_input is not None else "").strip()
     if phrase != "APPLY ROLLBACK":
-        rollback_output.append_stdout("Rollback canceled. Type APPLY ROLLBACK to confirm.\n")
+        rollback_output.append_stdout("Rollback canceled. Type APPLY ROLLBACK to execute rollback.\n")
         return
 
     success_rows = []
@@ -2713,7 +2685,7 @@ def execute_rollback_btn(_button):
     _invoke_context_callback(context, "refresh_rollback_export_ui")
 
     rollback_output.append_stdout(
-        f"Rollback results: {count_phrase(len(rollback_success_df), 'success')} | {count_phrase(len(rollback_errors_df), 'error')}\n"
+        f"Rollback complete: {count_phrase(len(rollback_success_df), 'success')} | {count_phrase(len(rollback_errors_df), 'error')}\n"
     )
     if not rollback_success_df.empty:
         rollback_output.append_display_data(rollback_success_df.head(3))
