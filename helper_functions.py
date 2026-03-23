@@ -2280,7 +2280,7 @@ def build_side_by_side_report(
                 function downloadSelectedIdsCsv() {{
                     const selected = getSelectedIds();
                     const csv = ['item_id', ...selected].join('\\n');
-                    triggerDownload(timestampedFilename('selected_item_ids.csv'), csv, 'text/csv;charset=utf-8');
+                    triggerDownload(timestampedFilename('{escape(Path(selection_out_json).with_suffix(".csv").name)}'), csv, 'text/csv;charset=utf-8');
                 }}
 
                 toggleAllEl.addEventListener('change', () => {{
