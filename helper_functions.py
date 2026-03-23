@@ -336,7 +336,7 @@ def _empty_output_message(label):
         "Matches CSV": "0 matches found.",
         "Errors CSV": "0 reported errors.",
         "All items CSV": "0 all-items rows available.",
-        "Success CSV": "0 successful updates.",
+        "Success CSV": "0 successful edits.",
     }
     return messages.get(label, f"{label}: 0 rows.")
 
@@ -1480,10 +1480,10 @@ def create_report_btn(_button):
 
     plan_for_report = plan_df.copy()
     if max_rows is None:
-        create_report_output.append_stdout("Creating report for all planned updates...\n")
+        create_report_output.append_stdout("Creating report for all planned edits...\n")
     else:
         plan_for_report = plan_for_report[plan_for_report["will_update"] == True].head(max_rows).copy()
-        create_report_output.append_stdout(f"Creating report with a match cap of {max_rows} planned update rows...\n")
+        create_report_output.append_stdout(f"Creating report with a match cap of {max_rows} planned edit rows...\n")
 
     report_path = build_side_by_side_report(
         plan_for_report,
@@ -1642,7 +1642,7 @@ def preview_dry_run_match_btn(_button):
     )
 
 def export_final_results_btn(_button):
-    """Export final update outcomes to a CSV with status labels."""
+    """Export final edit outcomes to a CSV with status labels."""
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
     final_results_path_input = context.get("final_results_path_input")
@@ -1663,7 +1663,7 @@ def export_final_results_btn(_button):
 
     combined_path = resolve_output_path(
         final_results_path_input.value,
-        "update_results.csv",
+        "edit_results.csv",
         timestamp_csv=True,
     )
     combined_results_df.to_csv(combined_path, index=False)
@@ -1678,7 +1678,7 @@ def export_final_results_btn(_button):
 
 
 def _build_combined_update_results(success_df, update_errors_df):
-    """Build a status-labeled update-results table from success and error rows."""
+    """Build a status-labeled edit-results table from success and error rows."""
     preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
 
     success_export = success_df.copy()
@@ -2276,17 +2276,17 @@ def build_side_by_side_report(
         return report_output_path
 
 # =====================================================================
-# Update function
+# Edit function
 # =====================================================================
 
 def apply_updates_btn(_button):
-    """Execute Step 6 update workflow using current plan and confirmation input."""
+    """Execute Step 6 edit workflow using current plan and confirmation input."""
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
     apply_edits_confirmation_input = context.get("apply_edits_confirmation_input")
     if apply_edits_output is None or selected_ids_to_edit_path_input is None:
-        raise RuntimeError("Filename.json and path must be configured before running the update.")
+        raise RuntimeError("Filename.json and path must be configured before running the edit.")
 
     apply_edits_output.clear_output()
     if context.get("gis") is None:
@@ -2305,7 +2305,7 @@ def apply_updates_btn(_button):
     selected_path = context.get("selected_item_ids_for_update_path")
 
     # Backward-compatible behavior: if user did not run the precheck button,
-    # load the selection file on demand before executing updates.
+    # load the selection file on demand before executing edits.
     if selected_item_ids is None:
         selected_path = resolve_existing_input_path(selected_ids_to_edit_path_input.value)
         if selected_path is not None:
@@ -2326,7 +2326,7 @@ def apply_updates_btn(_button):
                 messages.append("Continuing with the full scan results.")
                 selected_item_ids = None
         else:
-            messages.append("No selected IDs file was found. Applying updates to all rows where will_update=True.")
+            messages.append("No selected IDs file was found. Applying edits to all rows where will_update=True.")
     elif selected_path is not None:
         messages.append(
             f"Using preloaded selection from {selected_path} "
@@ -2334,16 +2334,16 @@ def apply_updates_btn(_button):
         )
 
     with apply_edits_output:
-        print("Execute update summary")
+        print("Execute edit summary")
         for line in messages:
             print(f"- {line}")
-        print("Applying updates now...")
+        print("Applying edits now...")
 
     with redirect_stdout(_OutputWidgetStdoutProxy(apply_edits_output)):
         success_df, update_errors_df, rollback_snapshot_df = apply_licenseinfo_updates(
             context["gis"],
             plan_df,
-            require_phrase="APPLY UPDATES",
+            require_phrase="APPLY EDITS",
             pause_seconds=0.0,
             selected_item_ids=selected_item_ids,
             confirmation_text=(apply_edits_confirmation_input.value if apply_edits_confirmation_input is not None else None),
@@ -2362,7 +2362,7 @@ def apply_updates_btn(_button):
     _invoke_context_callback(context, "refresh_rollback_export_ui")
     with apply_edits_output:
         print(
-            f"Update attempt complete: {count_phrase(len(success_df), 'success')} | "
+            f"Edit attempt complete: {count_phrase(len(success_df), 'success')} | "
             f"{count_phrase(len(update_errors_df), 'error')}"
         )
         if not success_df.empty:
@@ -2370,11 +2370,11 @@ def apply_updates_btn(_button):
             print(f"Showing {count_phrase(sample_count, 'sample edit result')}:")
             display(success_df.head(sample_count))
         else:
-            print("No successful updates to display.")
+            print("No successful edits to display.")
 
 
 def load_update_selection_btn(_button):
-    """Step 6 precheck: load selection file and preview update count before execute."""
+    """Step 6 precheck: load selection file and preview edit count before execute."""
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
@@ -2415,14 +2415,14 @@ def load_update_selection_btn(_button):
             messages.append("Continuing with the full scan results.")
             selected_item_ids = None
     else:
-        messages.append("No selected IDs file was found. Applying updates to all candidate items.")
+        messages.append("No selected IDs file was found. Applying edits to all candidate items.")
 
     to_update = plan_df[plan_df["will_update"] == True].copy()
     initial_count = len(to_update)
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        messages.append(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for update.")
+        messages.append(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit.")
 
     context["selected_item_ids_for_update"] = selected_item_ids
     context["selected_item_ids_for_update_path"] = str(selected_path) if selected_path is not None else None
@@ -2433,51 +2433,51 @@ def load_update_selection_btn(_button):
             print(f"- {line}")
 
         if to_update.empty:
-            print("Nothing to update.")
+            print("Nothing to edit.")
             return
 
         print(f"WARNING: You are about to edit {count_phrase(len(to_update), 'item')}.")
-        print("Type APPLY UPDATES in the confirmation field, then click Execute update.")
-        print("Basic details of the first several rows to be updated:")
+        print("Type APPLY EDITS in the confirmation field, then click Execute edit.")
+        print("Basic details of the first several rows to be edited:")
         preview = to_update[["item_id", "title", "owner", "type"]].head(3).reset_index(drop=True)
         preview.index += 1
         display(preview)
 
-# Function to apply the updates to AGO items. Accidental execution of this function is protected by a required input phrase "APPLY UPDATES"
+# Function to apply edits to AGO items. Accidental execution of this function is protected by a required input phrase "APPLY EDITS"
 def apply_licenseinfo_updates(
     gis,
     plan_df,
-    require_phrase="APPLY UPDATES",
+    require_phrase="APPLY EDITS",
     pause_seconds=0.0,
     selected_item_ids=None,
     confirmation_text=None,
 ):
     """
-    Apply updates to AGO items, but only after explicit confirmation input.
+    Apply edits to AGO items, but only after explicit confirmation input.
 
     PARAMS
     gis: authenticated GIS object
     plan_df: input DataFrame
-    require_phrase: the exact phrase that the user must type to confirm updates (default "APPLY UPDATES")
-    pause_seconds: number of seconds to pause between item update requests (default 0, can be used to avoid hitting rate limits)
+    require_phrase: the exact phrase that the user must type to confirm edits (default "APPLY EDITS")
+    pause_seconds: number of seconds to pause between item edit requests (default 0, can be used to avoid hitting rate limits)
 
     RETURNS
-    success_df: DataFrame of successfully updated items with columns for item_id, title, owner, and type
-    errors_df: DataFrame of any errors encountered during updates with columns for item_id, title, and error message
-    rollback_snapshot_df: DataFrame of pre-edit snapshots for rows that were successfully updated
+    success_df: DataFrame of successfully edited items with columns for item_id, title, owner, and type
+    errors_df: DataFrame of any errors encountered during edits with columns for item_id, title, and error message
+    rollback_snapshot_df: DataFrame of pre-edit snapshots for rows that were successfully edited
     """
     to_update = plan_df[plan_df["will_update"] == True].copy()
 
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        print(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for update.")
+        print(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit.")
 
     if to_update.empty:
-        print("Nothing to update.")
+        print("Nothing to edit.")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    print(f"WARNING: You are about to update {count_phrase(len(to_update), 'item')}.")
+    print(f"WARNING: You are about to edit {count_phrase(len(to_update), 'item')}.")
     print(f"If you want to continue, type {require_phrase}. Type anything else to cancel.")
 
     if confirmation_text is not None:
@@ -2486,12 +2486,12 @@ def apply_licenseinfo_updates(
         try:
             typed = input("Confirm: ").strip()
         except EOFError:
-            print("Update canceled: this notebook runtime does not support interactive input() from button callbacks.")
+            print("Edit canceled: this notebook runtime does not support interactive input() from button callbacks.")
             print(f"Use the confirmation input field and type exactly: {require_phrase}")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     if typed != require_phrase:
-        print("Update canceled.")
+        print("Edit canceled.")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     success_rows = []
@@ -2541,14 +2541,14 @@ def apply_licenseinfo_updates(
             time.sleep(pause_seconds)
 
         if i % 50 == 0:
-            print(f"Processed {i} of {len(to_update)} updates")
+            print(f"Processed {i} of {len(to_update)} edits")
 
     success_df = pd.DataFrame(success_rows)
     errors_df = pd.DataFrame(error_rows)
     rollback_snapshot_df = pd.DataFrame(rollback_snapshot_rows)
 
     print(
-        f"Update results: {count_phrase(len(success_df), 'success')} | "
+        f"Edit results: {count_phrase(len(success_df), 'success')} | "
         f"{count_phrase(len(errors_df), 'error')}"
     )
     return success_df, errors_df, rollback_snapshot_df
