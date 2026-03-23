@@ -2069,7 +2069,9 @@ def build_side_by_side_report(
                 pre {{ white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; background: #fafafa; border: 1px solid #eee; padding: 8px; }}
                 details {{ margin-top: 6px; }}
                 .actions {{ display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }}
-                .actions button {{ padding: 6px 10px; border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; cursor: pointer; }}
+                .actions button {{ padding: 6px 10px; border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }}
+                #downloadJsonBtn {{ background: #f7f7f7; border-color: #ccc; color: #222; }}
+                #downloadJsonBtn.ready {{ background: #2f9e44; border-color: #2f9e44; color: #fff; }}
                 .wrap {{ overflow: auto; max-height: calc(100vh - 180px); border: 1px solid #ddd; }}
                 @media (max-width: 1400px) {{
                     .meta-inner {{ display: block; min-height: 0; }}
@@ -2082,7 +2084,7 @@ def build_side_by_side_report(
             <h1>LicenseInfo Side-by-Side Review</h1>
             <div class="note">Generated: {escape(ts)} | {escape(count_phrase(len(df), 'row'))}</div>
             <div class="actions">
-                <button type="button" onclick="downloadSelectedIdsJson()">Download selected Item IDs (JSON): Upload to Notebook to use</button>
+                <button type="button" id="downloadJsonBtn" onclick="downloadSelectedIdsJson()">Download selected Item IDs (JSON): Upload to Notebook to use</button>
                 <button type="button" onclick="downloadSelectedIdsCsv()">Download selected Item IDs (CSV): For review/archive</button>
                 <span id="selectedCount">Selected: 0 items</span>
             </div>
@@ -2119,6 +2121,7 @@ def build_side_by_side_report(
                 const CHECK_CLASS = '.row-check';
                 const toggleAllEl = document.getElementById('toggleAll');
                 const countEl = document.getElementById('selectedCount');
+                const jsonDownloadBtn = document.getElementById('downloadJsonBtn');
                 const filterEl = document.getElementById('filterInput');
                 const rowsPerPageEl = document.getElementById('rowsPerPage');
                 const prevPageBtn = document.getElementById('prevPageBtn');
@@ -2163,6 +2166,9 @@ def build_side_by_side_report(
                 function updateSelectedCount() {{
                     const selected = getSelectedIds();
                     countEl.textContent = 'Selected: ' + selected.length + ' ' + (selected.length === 1 ? 'item' : 'items');
+                    if (jsonDownloadBtn) {{
+                        jsonDownloadBtn.classList.toggle('ready', selected.length > 0);
+                    }}
                 }}
 
                 function syncToggleState() {{

@@ -25,3 +25,7 @@ Add optional rollback with targeted undo and validate both baseline and remediat
 - Completed tickets: B3-01, B3-02, B3-03, B3-04
 - Blockers: Full end-to-end validation in live AGO org not executed in this session.
 - Next action: Run Pass A and Pass B in notebook runtime against org content and capture output artifacts.
+
+## Post-Batch Feature Additions
+
+- [x] F3-01 Report JSON download button turns green when one or more report row checkboxes are selected and returns to gray when none are selected.
