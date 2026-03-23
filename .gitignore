@@ -60,3 +60,11 @@ ago_item_description_editor_outputs/
 !.github/prompts/**
 !.github/burndown/
 !.github/burndown/**
+
+# Archived local-only planning docs (keep out of git tracking)
+.github/prompts/plan-agoItemDescriptionEditor.prompt.md
+.github/prompts/plan-agoUtilityMasterPlan.prompt.md
+.github/prompts/plan-post-runthrough-rollout.prompt.md
+.github/prompts/plan-repo-split-decision.prompt.md
+.github/prompts/runbook-operator-go-no-go.prompt.md
+.github/prompts/runbook-operator-quick-checklist.prompt.md
