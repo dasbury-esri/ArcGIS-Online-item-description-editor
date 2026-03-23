@@ -190,6 +190,101 @@ def display_embedded_html_report(report_path, *, height_px=760, output_widget=No
     return True
 
 
+def _build_inline_html_iframe(html_text, *, height_px=320):
+    """Build an iframe that renders an arbitrary HTML fragment inline."""
+    safe_html = html_text if html_text and str(html_text).strip() else "<div style='color:#6b7280;'>No HTML available.</div>"
+    document_html = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<style>body{font-family:Arial,sans-serif;margin:16px;line-height:1.5;word-break:break-word;}"
+        "img{max-width:100%;height:auto;}table{max-width:100%;}</style>"
+        "</head><body>"
+        f"{safe_html}"
+        "</body></html>"
+    )
+    encoded = base64.b64encode(document_html.encode("utf-8")).decode("ascii")
+    return (
+        f'<iframe src="data:text/html;charset=utf-8;base64,{encoded}" '
+        f'style="width:100%; height:{int(height_px)}px; border:1px solid #d0d7de; border-radius:6px; '
+        'background:#fff;" loading="lazy"></iframe>'
+    )
+
+
+def _extract_tou_match_fragment(html_text, *, strict_match=False):
+    """Return the first ToU block matched by the current replacement regex."""
+    source_html = "" if html_text is None else str(html_text)
+    if not source_html:
+        return ""
+
+    matcher = STRICT_TOU_BLOCK_RE if strict_match else TOU_BLOCK_RE
+    match = matcher.search(source_html)
+    return match.group(0) if match else ""
+
+
+def display_dry_run_iframe_preview(
+    output_widget,
+    *,
+    matched_html,
+    replacement_html,
+    item_title="",
+    item_id="",
+    item_owner="",
+    item_type="",
+    matched_terms="",
+    replacements_found="",
+    strict_match=False,
+):
+    """Render a report-style dry-run preview card for the current matching mode."""
+    if output_widget is None:
+        raise RuntimeError("A notebook output widget is required for iframe preview rendering.")
+
+    mode_label = "Strict" if strict_match else "Default semi-greedy"
+    matched_iframe = _build_inline_html_iframe(matched_html, height_px=320)
+    replacement_iframe = _build_inline_html_iframe(replacement_html, height_px=320)
+
+    info_rows = []
+    for label, value in [
+        ("Preview mode", mode_label),
+        ("Item", item_id),
+        ("Title", item_title),
+        ("Owner", item_owner),
+        ("Type", item_type),
+        ("Matched", matched_terms),
+        ("Replacements", replacements_found),
+    ]:
+        if value is not None and str(value).strip():
+            info_rows.append(f"<div><strong>{escape(label)}:</strong> {escape(str(value))}</div>")
+
+    markup = f"""
+    <div style="margin-top:12px; border:1px solid #d0d7de; border-radius:10px; background:#ffffff; overflow:hidden;">
+        <div style="padding:14px 16px; background:#f6f8fa; border-bottom:1px solid #d0d7de;">
+            <div style="font-weight:700; margin-bottom:6px;">Preview of the first updatable row</div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px 16px; font-size:13px; color:#374151;">
+                {''.join(info_rows)}
+            </div>
+        </div>
+        <div style="padding:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; align-items:start;">
+            <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
+                <div style="font-weight:600; margin-bottom:8px;">Matched HTML block</div>
+                {matched_iframe}
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer; font-weight:600;">Matched source</summary>
+                    <pre style="margin-top:8px; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; background:#ffffff; border:1px solid #d0d7de; border-radius:6px; padding:10px;">{escape(matched_html or '')}</pre>
+                </details>
+            </div>
+            <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
+                <div style="font-weight:600; margin-bottom:8px;">Replacement HTML</div>
+                {replacement_iframe}
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer; font-weight:600;">Replacement source</summary>
+                    <pre style="margin-top:8px; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; background:#ffffff; border:1px solid #d0d7de; border-radius:6px; padding:10px;">{escape(replacement_html or '')}</pre>
+                </details>
+            </div>
+        </div>
+    </div>
+    """
+    output_widget.append_display_data(HTML(markup))
+
+
 def count_phrase(count, singular, plural=None):
     if count == 1:
         noun = singular
@@ -1486,6 +1581,63 @@ def run_dry_run_with_file_btn(_button):
     context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
     dry_run_btn(_button)
 
+
+def preview_dry_run_match_btn(_button):
+    context = _ctx()
+    output8_preview = context.get("output8_preview")
+    if output8_preview is None:
+        raise RuntimeError("context['output8_preview'] is not configured.")
+
+    output8_preview.clear_output()
+
+    matches_df = context.get("matches_df")
+    if matches_df is None:
+        output8_preview.append_stdout("Run Step 2 or load saved scan files first.\n")
+        return
+
+    input8 = context.get("input8")
+    entered = (input8.value or "").strip() if input8 is not None else ""
+    context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
+
+    checkbox8 = context.get("checkbox8")
+    strict_match = bool(checkbox8.value) if checkbox8 is not None else False
+
+    replacement_tou = load_official_tou_html(context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE))
+    plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou, strict_match=strict_match)
+    to_update = plan_df[plan_df["will_update"] == True].copy()
+
+    if to_update.empty:
+        mode_label = "strict" if strict_match else "default"
+        output8_preview.append_stdout(
+            f"No updatable rows were found for the current {mode_label} matching mode, so there is nothing to preview.\n"
+        )
+        return
+
+    first_row = to_update.iloc[0]
+    matched_html = _extract_tou_match_fragment(first_row.get("old_licenseInfo"), strict_match=strict_match)
+    if not matched_html:
+        matched_html = first_row.get("old_licenseInfo") or ""
+        output8_preview.append_stdout(
+            "Could not isolate the matched block exactly, so the preview is showing the full existing Terms of Use HTML for the first updatable row.\n"
+        )
+    else:
+        output8_preview.append_stdout(
+            "Previewing the first updatable row using the current matching mode.\n"
+        )
+
+    display_dry_run_iframe_preview(
+        output8_preview,
+        matched_html=matched_html,
+        replacement_html=replacement_tou,
+        item_title=first_row.get("title") or "",
+        item_id=first_row.get("item_id") or "",
+        item_owner=first_row.get("owner") or "",
+        item_type=first_row.get("type") or "",
+        matched_terms=first_row.get("matched_terms") or "",
+        replacements_found=first_row.get("replacements_found") or "",
+        strict_match=strict_match,
+    )
+
 def export_final_results_btn(_button):
     context = _ctx()
     output12 = context.get("output12")
@@ -1597,7 +1749,7 @@ def dry_run_btn(_button):
     tou_path = context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE)
     replacement_tou = load_official_tou_html(tou_path)
     plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou, strict_match=strict_match)
-    dry_run_table = show_dry_run(plan_df, max_rows=200)
+    dry_run_table = show_dry_run(plan_df)
     rows_would_update = int((plan_df["will_update"] == True).sum())
     context["plan_df"] = plan_df
     context["dry_run_table"] = dry_run_table
@@ -1822,13 +1974,12 @@ def build_licenseinfo_update_plan(matches_df, replacement_tou, max_preview_len=1
     return pd.DataFrame(rows)
 
 
-def show_dry_run(plan_df, max_rows=50):
+def show_dry_run(plan_df):
     """
     Display review list only (no updates).
 
     PARAMS
     plan_df: DataFrame with columns for item_id, title, owner, type, matched_terms, replacements_found, will_update, old_preview, new_preview, old_licenseInfo, new_licenseInfo
-    max_rows: maximum number of rows to display in the review table (default 50)
 
     RETURNS
     to_update[display_cols]: a DataFrame filtered to the rows that would be updated.
@@ -1838,7 +1989,7 @@ def show_dry_run(plan_df, max_rows=50):
         "item_id", "title", "owner", "type",
         "matched_terms", "replacements_found", "old_preview", "new_preview"
     ]
-    return to_update[display_cols].head(max_rows)
+    return to_update[display_cols]
 
 # =====================================================================
 # Report generation functions for item review
