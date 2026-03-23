@@ -713,7 +713,8 @@ def bind_primary_scan_with_cancel(
     set_button_idle()
     context.setdefault("scan_running", False)
     context.setdefault("scan_cancel_requested", False)
-    
+
+
 def setup_notebook_btn(button):
     context = _ctx()
     setup_output = context.get("setup_output")
@@ -733,9 +734,10 @@ def setup_notebook_btn(button):
         setup_output.append_stdout("Authentication complete.\n")
         return True
     return False
-    
+
+
 # ======================================================================
-# Org scanning functions 
+# Org scanning functions
 # ======================================================================
 
 def parse_target_terms(raw_text):
@@ -1190,129 +1192,6 @@ def scan_org_licenseinfo_without_10k_cap(
 
     return matches_df, errors_df, all_items_df
 
-def run_secondary_scan_btn(button):
-    context = _ctx()
-    secondary_scan_output = context.get("secondary_scan_output")
-    secondary_scan_enabled_checkbox = context.get("secondary_scan_enabled_checkbox")
-    secondary_scan_terms_input = context.get("secondary_scan_terms_input")
-    if (
-        secondary_scan_output is None
-        or secondary_scan_enabled_checkbox is None
-        or secondary_scan_terms_input is None
-    ):
-        raise RuntimeError(
-            "context['secondary_scan_output'], context['secondary_scan_enabled_checkbox'], and context['secondary_scan_terms_input'] must be configured."
-        )
-
-    secondary_scan_output.clear_output()
-
-    if not secondary_scan_enabled_checkbox.value:
-        secondary_scan_output.append_stdout("Secondary scan is disabled. Select the checkbox above to run it.\n")
-        return
-
-    if context.get("gis") is None:
-        secondary_scan_output.append_stdout("Please run Step 1: Setup and authenticate first.\n")
-        return
-
-    matches_df = context.get("matches_df")
-    if matches_df is not None and not matches_df.empty:
-        exclude_ids = set(matches_df["item_id"].dropna().astype(str))
-    else:
-        previous_matches_path = resolve_existing_input_path("scan_matches.csv")
-        if previous_matches_path is not None:
-            previous_matches_df = pd.read_csv(previous_matches_path, dtype={"item_id": str})
-            exclude_ids = set(previous_matches_df["item_id"].dropna().astype(str))
-        else:
-            exclude_ids = set()
-
-    new_terms = parse_target_terms(secondary_scan_terms_input.value)
-    if not new_terms:
-        secondary_scan_output.append_stdout("No new search terms provided.\n")
-        return
-
-    secondary_scan_terms_input.value = normalize_target_terms_text(new_terms)
-
-    # Fast path: reuse primary scan cache (all_items_df with licenseInfo) to avoid re-crawling org content.
-    all_items_df = context.get("all_items_df")
-    can_use_cache = (
-        all_items_df is not None
-        and not all_items_df.empty
-        and {"item_id", "licenseInfo", "public_url", "portal_url", "thumbnail"}.issubset(all_items_df.columns)
-    )
-
-    if can_use_cache:
-        secondary_scan_output.append_stdout(
-            f"Running secondary scan with {count_phrase(len(new_terms), 'term')} using cached Step 2 results...\n"
-        )
-
-        working_df = all_items_df.copy()
-        if exclude_ids:
-            working_df = working_df[~working_df["item_id"].astype(str).isin(exclude_ids)].copy()
-
-        lowered_terms = [t.lower() for t in new_terms]
-
-        def _matched_terms_for_row(license_text):
-            value = str(license_text or "").lower()
-            matched = [term for term in new_terms if term.lower() in value]
-            return ", ".join(matched)
-
-        matched_terms_series = working_df["licenseInfo"].map(_matched_terms_for_row)
-        matched_mask = matched_terms_series != ""
-
-        new_matches_df = working_df.loc[matched_mask].copy()
-        new_matches_df["matched_terms"] = matched_terms_series[matched_mask]
-
-        # Keep output schema aligned with primary scan.
-        expected_cols = [
-            "item_id",
-            "title",
-            "owner",
-            "type",
-            "access",
-            "licenseInfo",
-            "matched_terms",
-            "public_url",
-            "portal_url",
-            "thumbnail",
-        ]
-        for col in expected_cols:
-            if col not in new_matches_df.columns:
-                new_matches_df[col] = ""
-        new_matches_df = new_matches_df[expected_cols]
-        new_matches_df["review_url"] = new_matches_df["public_url"].fillna(new_matches_df["portal_url"])
-
-        new_errors_df = pd.DataFrame(columns=["username", "error"])
-        new_all_items_df = all_items_df.copy()
-        secondary_scan_output.append_stdout("Secondary scan completed from cache without a full org re-scan.\n")
-    else:
-        secondary_scan_output.append_stdout(f"Running secondary scan with {count_phrase(len(new_terms), 'term')}...\n")
-        with redirect_stdout(_OutputWidgetStdoutProxy(secondary_scan_output)):
-            new_matches_df, new_errors_df, new_all_items_df = scan_org_licenseinfo_without_10k_cap(
-                context["gis"],
-                target_strings=new_terms,
-                exclude_item_ids=exclude_ids,
-            )
-
-    if not new_matches_df.empty and exclude_ids:
-        new_matches_df = new_matches_df[~new_matches_df["item_id"].isin(exclude_ids)].copy()
-
-    context["new_matches_df"] = new_matches_df
-    context["new_errors_df"] = new_errors_df
-    context["new_all_items_df"] = new_all_items_df
-
-    secondary_scan_output.append_stdout(
-        f"Secondary scan results: {count_phrase(len(new_matches_df), 'new match')} | "
-        f"{count_phrase(len(new_errors_df), 'error')}\n"
-    )
-    secondary_scan_output.append_stdout("Use the next step to save secondary scan outputs.\n")
-    sample_count = min(len(new_matches_df), 3)
-    if sample_count:
-        secondary_scan_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
-        secondary_scan_output.append_display_data(new_matches_df.head(sample_count))
-    else:
-        secondary_scan_output.append_stdout("No sample matches to display.\n")
-    _invoke_context_callback(context, "refresh_secondary_save_ui")
-
 # =====================================================================
 # File handling
 # =====================================================================
@@ -1377,66 +1256,6 @@ def save_scan_outputs_btn(button):
         for label in skipped_targets:
             save_scan_output.append_stdout(f"{_empty_output_message(label)}\n")
 
-
-def save_secondary_scan_outputs_btn(button):
-    context = _ctx()
-    save_secondary_scan_output = context.get("save_secondary_scan_output")
-    secondary_matches_path_input = context.get("secondary_matches_path_input")
-    secondary_errors_path_input = context.get("secondary_errors_path_input")
-    secondary_all_items_path_input = context.get("secondary_all_items_path_input")
-    if save_secondary_scan_output is None:
-        raise RuntimeError("context['save_secondary_scan_output'] is not configured.")
-
-    save_secondary_scan_output.clear_output()
-    matches_df = context.get("new_matches_df")
-    errors_df = context.get("new_errors_df")
-    all_items_df = context.get("new_all_items_df")
-    if matches_df is None or errors_df is None or all_items_df is None:
-        save_secondary_scan_output.append_stdout("Run Step 4 secondary scan first.\n")
-        return {"status": "warning", "message": "Secondary save skipped. Run Step 4 first."}
-
-    export_targets = []
-    skipped_targets = []
-
-    if not matches_df.empty:
-        matches_path = resolve_output_path(
-            secondary_matches_path_input.value if secondary_matches_path_input is not None else None,
-            "secondary_scan_matches.csv",
-        )
-        export_targets.append(("Matches CSV", matches_df, matches_path))
-    else:
-        skipped_targets.append("Matches CSV")
-
-    if not errors_df.empty:
-        errors_path = resolve_output_path(
-            secondary_errors_path_input.value if secondary_errors_path_input is not None else None,
-            "secondary_scan_errors.csv",
-        )
-        export_targets.append(("Errors CSV", errors_df, errors_path))
-    else:
-        skipped_targets.append("Errors CSV")
-
-    if not all_items_df.empty:
-        all_items_path = resolve_output_path(
-            secondary_all_items_path_input.value if secondary_all_items_path_input is not None else None,
-            "secondary_scan_all_items.csv",
-        )
-        export_targets.append(("All items CSV", all_items_df, all_items_path))
-    else:
-        skipped_targets.append("All items CSV")
-
-    if not export_targets:
-        save_secondary_scan_output.append_stdout("Nothing to export. All secondary scan output tables are empty.\n")
-        return {"status": "warning", "message": "Secondary save skipped. No secondary rows to export."}
-
-    save_secondary_scan_output.append_stdout("Saved files:\n")
-    for _label, dataframe, target_path in export_targets:
-        dataframe.to_csv(target_path, index=False)
-        save_secondary_scan_output.append_stdout(f"- {target_path}\n")
-
-    if skipped_targets:
-        for label in skipped_targets:
-            save_secondary_scan_output.append_stdout(f"{_empty_output_message(label)}\n")
 
 def export_dry_run_btn(_button):
     context = _ctx()
@@ -1531,7 +1350,7 @@ def create_report_btn(_button):
             "In ArcGIS Online, open the saved HTML report from the Files panel rather than from an output-cell button.\n"
         )
     create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
-    create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 8.\n")
+    create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 6.\n")
     create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
@@ -1661,7 +1480,7 @@ def export_final_results_btn(_button):
     success_df = context.get("success_df")
     update_errors_df = context.get("update_errors_df")
     if success_df is None or update_errors_df is None:
-        export_final_results_output.append_stdout("Run Step 8 first to create the export data.\n")
+        export_final_results_output.append_stdout("Run Step 6 first to create the export data.\n")
         return
 
     export_targets = []
@@ -1697,45 +1516,6 @@ def export_final_results_btn(_button):
     if skipped_targets:
         for label in skipped_targets:
             export_final_results_output.append_stdout(f"{_empty_output_message(label)}\n")
-
-# =====================================================================
-# Strict match filter
-# =====================================================================
-
-def run_strict_match_filter_btn(_button):
-    context = _ctx()
-    exact_match_output = context.get("exact_match_output")
-    exact_match_input = context.get("exact_match_input")
-    if exact_match_output is None or exact_match_input is None:
-        raise RuntimeError("context['exact_match_output'] and context['exact_match_input'] must be configured.")
-
-    exact_match_output.clear_output()
-    matches_df = context.get("matches_df")
-    if matches_df is None:
-        exact_match_output.append_stdout("Run Step 2 or load saved scan files first.\n")
-        return
-
-    exact_term = (exact_match_input.value or "").strip()
-    if not exact_term:
-        exact_match_output.append_stdout("Enter exact text to filter the results.\n")
-        return
-
-    exact_url_df = matches_df[
-        matches_df["matched_terms"].str.contains(
-            exact_term,
-            case=False,
-            na=False,
-        )
-    ].copy()
-    context["exact_url_df"] = exact_url_df
-
-    exact_match_output.append_stdout(f"Exact-match results: {count_phrase(len(exact_url_df), 'item')}\n")
-    sample_count = min(len(exact_url_df), 3)
-    if sample_count:
-        exact_match_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample result')}:\n")
-        exact_match_output.append_display_data(exact_url_df.head(sample_count))
-    else:
-        exact_match_output.append_stdout("No exact-match results to display.\n")
 
 # =====================================================================
 # Dry run functions
@@ -2380,12 +2160,12 @@ def apply_updates_btn(_button):
 
 
 def load_update_selection_btn(_button):
-    """Step 8 precheck: load selection file and preview update count before execute."""
+    """Step 6 precheck: load selection file and preview update count before execute."""
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
     if apply_edits_output is None or selected_ids_to_edit_path_input is None:
-        raise RuntimeError("Step 8 selection input and output must be configured.")
+        raise RuntimeError("Step 6 selection input and output must be configured.")
 
     apply_edits_output.clear_output()
     if context.get("gis") is None:

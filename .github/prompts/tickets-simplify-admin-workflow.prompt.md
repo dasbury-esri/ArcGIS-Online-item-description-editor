@@ -25,10 +25,10 @@ Use this as the implementation queue for the simplification work. Complete Batch
 
 ### Batch 2 Status
 
-- [ ] B2-01 Remove secondary-scan feature path
-- [ ] B2-02 Remove exact/narrowing feature path
-- [ ] B2-03 Rewire step order and dependency messaging
-- [ ] B2-04 Remove orphaned controls and dead export/save branches
+- [x] B2-01 Remove secondary-scan feature path
+- [x] B2-02 Remove exact/narrowing feature path
+- [x] B2-03 Rewire step order and dependency messaging
+- [x] B2-04 Remove orphaned controls and dead export/save branches
 
 ### Batch 3 Status
 
