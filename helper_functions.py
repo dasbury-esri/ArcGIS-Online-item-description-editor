@@ -108,14 +108,23 @@ def with_csv_timestamp(path_obj):
     if path_obj.suffix.lower() != ".csv":
         return path_obj
 
+    return with_timestamp_suffix(path_obj)
+
+
+def with_timestamp_suffix(path_obj):
+    """Return a path with filename pattern base_YYYYMMDD_HHMM.ext.
+
+    If the base filename already ends with a timestamp suffix, replace it with the current timestamp.
+    """
+    path_obj = Path(path_obj)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     stem = path_obj.stem
     if CSV_TIMESTAMP_SUFFIX_RE.search(stem):
         stem = CSV_TIMESTAMP_SUFFIX_RE.sub("", stem)
-    return path_obj.with_name(f"{stem}_{timestamp}.csv")
+    return path_obj.with_name(f"{stem}_{timestamp}{path_obj.suffix}")
 
 
-def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False):
+def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False, timestamp_output=False):
     """Resolve a writable output path and ensure its parent directory exists."""
     raw_value = str(filename_or_path or "").strip()
     target_path = Path(raw_value if raw_value else default_filename).expanduser()
@@ -123,6 +132,8 @@ def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False)
         target_path = get_output_dir() / target_path
     if timestamp_csv:
         target_path = with_csv_timestamp(target_path)
+    if timestamp_output:
+        target_path = with_timestamp_suffix(target_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     return target_path.resolve()
 
@@ -1487,7 +1498,7 @@ def create_report_btn(_button):
 
     report_path = build_side_by_side_report(
         plan_for_report,
-        report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html")),
+        report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html", timestamp_output=True)),
         only_updates=max_rows is None,
         gis=context.get("gis"),
         selection_out_json=Path(selection_json_name).name,
@@ -1511,7 +1522,10 @@ def create_report_btn(_button):
         )
     create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
     create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 6.\n")
-    create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
+    create_report_output.append_stdout(
+        f"When downloading item IDs from the report, the output file name will be: "
+        f"{Path(selection_json_name).stem}_YYYYMMDD_HHMM{Path(selection_json_name).suffix}\n"
+    )
 
 def load_previous_scan_btn(_button):
     """Load scan results from a CSV and repopulate scan context tables."""
@@ -2222,18 +2236,25 @@ def build_side_by_side_report(
                     URL.revokeObjectURL(url);
                 }}
 
+                function timestampedFilename(baseName) {{
+                    const now = new Date();
+                    const pad = (value) => String(value).padStart(2, '0');
+                    const ts = String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes());
+                    const m = String(baseName || '').match(/^(.*?)(\\.[^.]+)?$/);
+                    const stem = (m && m[1]) ? m[1] : 'output';
+                    const ext = (m && m[2]) ? m[2] : '';
+                    return stem + '_' + ts + ext;
+                }}
+
                 function downloadSelectedIdsJson() {{
                     const selected = getSelectedIds();
-                    triggerDownload('{escape(selection_out_json)}', JSON.stringify(selected, null, 2), 'application/json');
+                    triggerDownload(timestampedFilename('{escape(selection_out_json)}'), JSON.stringify(selected, null, 2), 'application/json');
                 }}
 
                 function downloadSelectedIdsCsv() {{
                     const selected = getSelectedIds();
                     const csv = ['item_id', ...selected].join('\\n');
-                    const now = new Date();
-                    const pad = (value) => String(value).padStart(2, '0');
-                    const ts = String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes());
-                    triggerDownload('selected_item_ids_' + ts + '.csv', csv, 'text/csv;charset=utf-8');
+                    triggerDownload(timestampedFilename('selected_item_ids.csv'), csv, 'text/csv;charset=utf-8');
                 }}
 
                 toggleAllEl.addEventListener('change', () => {{
