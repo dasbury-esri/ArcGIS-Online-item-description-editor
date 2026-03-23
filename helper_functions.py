@@ -138,6 +138,15 @@ def with_timestamp_suffix(path_obj, timestamp=None):
     return path_obj.with_name(f"{stem}_{ts_value}{path_obj.suffix}")
 
 
+def strip_timestamp_suffix(path_obj):
+    """Return a path with any trailing _YYYYMMDD_HHMM suffix removed from the stem."""
+    path_obj = Path(path_obj)
+    stem = path_obj.stem
+    if CSV_TIMESTAMP_SUFFIX_RE.search(stem):
+        stem = CSV_TIMESTAMP_SUFFIX_RE.sub("", stem)
+    return path_obj.with_name(f"{stem}{path_obj.suffix}")
+
+
 def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False, timestamp_output=False):
     """Resolve a writable output path and ensure its parent directory exists."""
     raw_value = str(filename_or_path or "").strip()
@@ -1504,7 +1513,7 @@ def create_report_btn(_button):
         selection_json_name = f"{selection_json_name}.json"
 
     output_timestamp = _get_output_timestamp(context)
-    selection_json_name = with_timestamp_suffix(Path(selection_json_name).name, timestamp=output_timestamp).name
+    selection_json_name = strip_timestamp_suffix(Path(selection_json_name).name).name
 
     plan_for_report = plan_df.copy()
     if max_rows is None:
@@ -2345,7 +2354,8 @@ def apply_updates_btn(_button):
     # Backward-compatible behavior: if user did not run the precheck button,
     # load the selection file on demand before executing edits.
     if selected_item_ids is None:
-        selected_path = resolve_existing_input_path(selected_ids_to_edit_path_input.value)
+        requested_path = str(selected_ids_to_edit_path_input.value or "").strip()
+        selected_path = resolve_existing_input_path(requested_path)
         if selected_path is not None:
             try:
                 if selected_path.suffix.lower() == ".json":
@@ -2360,11 +2370,15 @@ def apply_updates_btn(_button):
                         f"from {selected_path}"
                     )
             except Exception as exc:
-                messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
-                messages.append("Continuing with the full scan results.")
-                selected_item_ids = None
+                with apply_edits_output:
+                    print(f"Could not load selected IDs file ({selected_path}): {exc}")
+                return {"status": "failure", "message": "Selected IDs file could not be read."}
         else:
-            messages.append("No selected IDs file was found. Applying edits to all rows where will_update=True.")
+            if requested_path:
+                with apply_edits_output:
+                    print(f"Selected IDs file not found: {requested_path}")
+                return {"status": "failure", "message": "Selected IDs file not found."}
+            messages.append("No selected IDs file was provided. Applying edits to all rows where will_update=True.")
     elif selected_path is not None:
         messages.append(
             f"Using preloaded selection from {selected_path} "
@@ -2433,7 +2447,8 @@ def load_update_selection_btn(_button):
 
     messages = []
     selected_item_ids = None
-    selected_path = resolve_existing_input_path(selected_ids_to_edit_path_input.value)
+    requested_path = str(selected_ids_to_edit_path_input.value or "").strip()
+    selected_path = resolve_existing_input_path(requested_path)
     if selected_path is not None:
         try:
             if selected_path.suffix.lower() == ".json":
@@ -2449,11 +2464,15 @@ def load_update_selection_btn(_button):
                     f"from {selected_path}"
                 )
         except Exception as exc:
-            messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
-            messages.append("Continuing with the full scan results.")
-            selected_item_ids = None
+            with apply_edits_output:
+                print(f"Could not load selected IDs file ({selected_path}): {exc}")
+            return {"status": "failure", "message": "Selected IDs file could not be read."}
     else:
-        messages.append("No selected IDs file was found. Applying edits to all candidate items.")
+        if requested_path:
+            with apply_edits_output:
+                print(f"Selected IDs file not found: {requested_path}")
+            return {"status": "failure", "message": "Selected IDs file not found."}
+        messages.append("No selected IDs file was provided. Applying edits to all candidate items.")
 
     to_update = plan_df[plan_df["will_update"] == True].copy()
     initial_count = len(to_update)
