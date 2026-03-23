@@ -567,10 +567,10 @@ def _invoke_context_callback(context, callback_key):
 
 def bind_primary_scan_with_cancel(
     button,
-    status_key="status2",
-    output_key="output2",
-    input_key="input2",
-    limit_input_key="input2_limit",
+    status_key="scan_status",
+    output_key="scan_output",
+    input_key="scan_terms_input",
+    limit_input_key="scan_limit_input",
 ):
     """Bind Step 2 button with Scan/Cancel toggle behavior."""
     context = _ctx()
@@ -716,21 +716,21 @@ def bind_primary_scan_with_cancel(
     
 def setup_notebook_btn(button):
     context = _ctx()
-    output1 = context.get("output1")
-    if output1 is None:
-        raise RuntimeError("context['output1'] is not configured.")
+    setup_output = context.get("setup_output")
+    if setup_output is None:
+        raise RuntimeError("context['setup_output'] is not configured.")
 
     auth_container = context.get("auth_container")
     if auth_container is not None:
         auth_container.children = ()
 
-    output1.clear_output()
-    output1.append_stdout("Setting up the notebook environment...\n")
-    output1.append_stdout(f"\tPython version: {sys.version}\n")
-    output1.append_stdout(f"\tArcGIS for Python API version: {arcgis.__version__}\n")
-    authenticate_gis(context=context, output_widget=output1)
+    setup_output.clear_output()
+    setup_output.append_stdout("Setting up the notebook environment...\n")
+    setup_output.append_stdout(f"\tPython version: {sys.version}\n")
+    setup_output.append_stdout(f"\tArcGIS for Python API version: {arcgis.__version__}\n")
+    authenticate_gis(context=context, output_widget=setup_output)
     if context.get("gis") is not None:
-        output1.append_stdout("Authentication complete.\n")
+        setup_output.append_stdout("Authentication complete.\n")
         return True
     return False
     
@@ -770,40 +770,40 @@ def normalize_target_terms_text(terms):
 
 def run_primary_scan_btn(button):
     context = _ctx()
-    output2 = context.get("output2")
-    input2 = context.get("input2")
-    input2_limit = context.get("input2_limit")
-    if output2 is None or input2 is None:
-        raise RuntimeError("context['output2'] and context['input2'] must be configured.")
+    scan_output = context.get("scan_output")
+    scan_terms_input = context.get("scan_terms_input")
+    scan_limit_input = context.get("scan_limit_input")
+    if scan_output is None or scan_terms_input is None:
+        raise RuntimeError("context['scan_output'] and context['scan_terms_input'] must be configured.")
 
-    output2.clear_output()
+    scan_output.clear_output()
     if context.get("gis") is None:
-        output2.append_stdout("Please run Step 1: Setup and authenticate first.\n")
+        scan_output.append_stdout("Please run Step 1: Setup and authenticate first.\n")
         return
 
-    terms = parse_target_terms(input2.value)
+    terms = parse_target_terms(scan_terms_input.value)
     if not terms:
-        output2.append_stdout("No search terms provided.\n")
+        scan_output.append_stdout("No search terms provided.\n")
         return
 
-    input2.value = normalize_target_terms_text(terms)
+    scan_terms_input.value = normalize_target_terms_text(terms)
 
     try:
         max_matches = _parse_optional_positive_int(
-            input2_limit.value if input2_limit is not None else None,
+            scan_limit_input.value if scan_limit_input is not None else None,
             "Optional match cap",
         )
     except ValueError as exc:
-        output2.append_stdout(f"{exc}\n")
+        scan_output.append_stdout(f"{exc}\n")
         return
 
     if max_matches is None:
-        output2.append_stdout(f"Running scan with {count_phrase(len(terms), 'term')} across the full organization...\n")
+        scan_output.append_stdout(f"Running scan with {count_phrase(len(terms), 'term')} across the full organization...\n")
     else:
-        output2.append_stdout(
+        scan_output.append_stdout(
             f"Running scan with {count_phrase(len(terms), 'term')} and a match cap of {max_matches}...\n"
         )
-    with redirect_stdout(_OutputWidgetStdoutProxy(output2)):
+    with redirect_stdout(_OutputWidgetStdoutProxy(scan_output)):
         matches_df, errors_df, all_items_df = scan_org_licenseinfo_without_10k_cap(
             context["gis"],
             target_strings=terms,
@@ -814,16 +814,16 @@ def run_primary_scan_btn(button):
     context["all_items_df"] = all_items_df
     context["TARGET_STRINGS"] = terms
 
-    output2.append_stdout(
+    scan_output.append_stdout(
         f"Scan results: {count_phrase(len(matches_df), 'match')} | "
         f"{count_phrase(len(errors_df), 'error')}\n"
     )
     sample_count = min(len(matches_df), 3)
     if sample_count:
-        output2.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
-        output2.append_display_data(matches_df.head(sample_count))
+        scan_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
+        scan_output.append_display_data(matches_df.head(sample_count))
     else:
-        output2.append_stdout("No sample matches to display.\n")
+        scan_output.append_stdout("No sample matches to display.\n")
 
 
 def _paged_get(gis, path, params=None, records_key="items", page_size=100):
@@ -1192,20 +1192,26 @@ def scan_org_licenseinfo_without_10k_cap(
 
 def run_secondary_scan_btn(button):
     context = _ctx()
-    output5 = context.get("output5")
-    checkbox5 = context.get("checkbox5")
-    input5 = context.get("input5")
-    if output5 is None or checkbox5 is None or input5 is None:
-        raise RuntimeError("context['output5'], context['checkbox5'], and context['input5'] must be configured.")
+    secondary_scan_output = context.get("secondary_scan_output")
+    secondary_scan_enabled_checkbox = context.get("secondary_scan_enabled_checkbox")
+    secondary_scan_terms_input = context.get("secondary_scan_terms_input")
+    if (
+        secondary_scan_output is None
+        or secondary_scan_enabled_checkbox is None
+        or secondary_scan_terms_input is None
+    ):
+        raise RuntimeError(
+            "context['secondary_scan_output'], context['secondary_scan_enabled_checkbox'], and context['secondary_scan_terms_input'] must be configured."
+        )
 
-    output5.clear_output()
+    secondary_scan_output.clear_output()
 
-    if not checkbox5.value:
-        output5.append_stdout("Secondary scan is disabled. Select the checkbox above to run it.\n")
+    if not secondary_scan_enabled_checkbox.value:
+        secondary_scan_output.append_stdout("Secondary scan is disabled. Select the checkbox above to run it.\n")
         return
 
     if context.get("gis") is None:
-        output5.append_stdout("Please run Step 1: Setup and authenticate first.\n")
+        secondary_scan_output.append_stdout("Please run Step 1: Setup and authenticate first.\n")
         return
 
     matches_df = context.get("matches_df")
@@ -1219,12 +1225,12 @@ def run_secondary_scan_btn(button):
         else:
             exclude_ids = set()
 
-    new_terms = parse_target_terms(input5.value)
+    new_terms = parse_target_terms(secondary_scan_terms_input.value)
     if not new_terms:
-        output5.append_stdout("No new search terms provided.\n")
+        secondary_scan_output.append_stdout("No new search terms provided.\n")
         return
 
-    input5.value = normalize_target_terms_text(new_terms)
+    secondary_scan_terms_input.value = normalize_target_terms_text(new_terms)
 
     # Fast path: reuse primary scan cache (all_items_df with licenseInfo) to avoid re-crawling org content.
     all_items_df = context.get("all_items_df")
@@ -1235,7 +1241,7 @@ def run_secondary_scan_btn(button):
     )
 
     if can_use_cache:
-        output5.append_stdout(
+        secondary_scan_output.append_stdout(
             f"Running secondary scan with {count_phrase(len(new_terms), 'term')} using cached Step 2 results...\n"
         )
 
@@ -1277,10 +1283,10 @@ def run_secondary_scan_btn(button):
 
         new_errors_df = pd.DataFrame(columns=["username", "error"])
         new_all_items_df = all_items_df.copy()
-        output5.append_stdout("Secondary scan completed from cache without a full org re-scan.\n")
+        secondary_scan_output.append_stdout("Secondary scan completed from cache without a full org re-scan.\n")
     else:
-        output5.append_stdout(f"Running secondary scan with {count_phrase(len(new_terms), 'term')}...\n")
-        with redirect_stdout(_OutputWidgetStdoutProxy(output5)):
+        secondary_scan_output.append_stdout(f"Running secondary scan with {count_phrase(len(new_terms), 'term')}...\n")
+        with redirect_stdout(_OutputWidgetStdoutProxy(secondary_scan_output)):
             new_matches_df, new_errors_df, new_all_items_df = scan_org_licenseinfo_without_10k_cap(
                 context["gis"],
                 target_strings=new_terms,
@@ -1294,17 +1300,17 @@ def run_secondary_scan_btn(button):
     context["new_errors_df"] = new_errors_df
     context["new_all_items_df"] = new_all_items_df
 
-    output5.append_stdout(
+    secondary_scan_output.append_stdout(
         f"Secondary scan results: {count_phrase(len(new_matches_df), 'new match')} | "
         f"{count_phrase(len(new_errors_df), 'error')}\n"
     )
-    output5.append_stdout("Use the next step to save secondary scan outputs.\n")
+    secondary_scan_output.append_stdout("Use the next step to save secondary scan outputs.\n")
     sample_count = min(len(new_matches_df), 3)
     if sample_count:
-        output5.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
-        output5.append_display_data(new_matches_df.head(sample_count))
+        secondary_scan_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample match')}:\n")
+        secondary_scan_output.append_display_data(new_matches_df.head(sample_count))
     else:
-        output5.append_stdout("No sample matches to display.\n")
+        secondary_scan_output.append_stdout("No sample matches to display.\n")
     _invoke_context_callback(context, "refresh_secondary_save_ui")
 
 # =====================================================================
@@ -1313,19 +1319,19 @@ def run_secondary_scan_btn(button):
 
 def save_scan_outputs_btn(button):
     context = _ctx()
-    output3 = context.get("output3")
-    input3_matches = context.get("input3_matches")
-    input3_errors = context.get("input3_errors")
-    input3_all_items = context.get("input3_all_items")
-    if output3 is None:
-        raise RuntimeError("context['output3'] is not configured.")
+    save_scan_output = context.get("save_scan_output")
+    scan_matches_path_input = context.get("scan_matches_path_input")
+    scan_errors_path_input = context.get("scan_errors_path_input")
+    scan_all_items_path_input = context.get("scan_all_items_path_input")
+    if save_scan_output is None:
+        raise RuntimeError("context['save_scan_output'] is not configured.")
 
-    output3.clear_output()
+    save_scan_output.clear_output()
     matches_df = context.get("matches_df")
     errors_df = context.get("errors_df")
     all_items_df = context.get("all_items_df")
     if matches_df is None or errors_df is None or all_items_df is None:
-        output3.append_stdout("Run Step 2 or Step 3 to load saved scan files first.\n")
+        save_scan_output.append_stdout("Run Step 2 or Step 3 to load saved scan files first.\n")
         return
 
     export_targets = []
@@ -1333,7 +1339,7 @@ def save_scan_outputs_btn(button):
 
     if not matches_df.empty:
         matches_path = resolve_output_path(
-            input3_matches.value if input3_matches is not None else None,
+            scan_matches_path_input.value if scan_matches_path_input is not None else None,
             "scan_matches.csv",
         )
         export_targets.append(("Matches CSV", matches_df, matches_path))
@@ -1342,7 +1348,7 @@ def save_scan_outputs_btn(button):
 
     if not errors_df.empty:
         errors_path = resolve_output_path(
-            input3_errors.value if input3_errors is not None else None,
+            scan_errors_path_input.value if scan_errors_path_input is not None else None,
             "scan_errors.csv",
         )
         export_targets.append(("Errors CSV", errors_df, errors_path))
@@ -1351,7 +1357,7 @@ def save_scan_outputs_btn(button):
 
     if not all_items_df.empty:
         all_items_path = resolve_output_path(
-            input3_all_items.value if input3_all_items is not None else None,
+            scan_all_items_path_input.value if scan_all_items_path_input is not None else None,
             "scan_all_items.csv",
         )
         export_targets.append(("All items CSV", all_items_df, all_items_path))
@@ -1359,34 +1365,34 @@ def save_scan_outputs_btn(button):
         skipped_targets.append("All items CSV")
 
     if not export_targets:
-        output3.append_stdout("Nothing to export. All scan output tables are empty.\n")
+        save_scan_output.append_stdout("Nothing to export. All scan output tables are empty.\n")
         return
 
-    output3.append_stdout("Saved files:\n")
+    save_scan_output.append_stdout("Saved files:\n")
     for _label, dataframe, target_path in export_targets:
         dataframe.to_csv(target_path, index=False)
-        output3.append_stdout(f"- {target_path}\n")
+        save_scan_output.append_stdout(f"- {target_path}\n")
 
     if skipped_targets:
         for label in skipped_targets:
-            output3.append_stdout(f"{_empty_output_message(label)}\n")
+            save_scan_output.append_stdout(f"{_empty_output_message(label)}\n")
 
 
 def save_secondary_scan_outputs_btn(button):
     context = _ctx()
-    output6 = context.get("output6")
-    input6_secondary_matches = context.get("input6_secondary_matches")
-    input6_secondary_errors = context.get("input6_secondary_errors")
-    input6_secondary_all_items = context.get("input6_secondary_all_items")
-    if output6 is None:
-        raise RuntimeError("context['output6'] is not configured.")
+    save_secondary_scan_output = context.get("save_secondary_scan_output")
+    secondary_matches_path_input = context.get("secondary_matches_path_input")
+    secondary_errors_path_input = context.get("secondary_errors_path_input")
+    secondary_all_items_path_input = context.get("secondary_all_items_path_input")
+    if save_secondary_scan_output is None:
+        raise RuntimeError("context['save_secondary_scan_output'] is not configured.")
 
-    output6.clear_output()
+    save_secondary_scan_output.clear_output()
     matches_df = context.get("new_matches_df")
     errors_df = context.get("new_errors_df")
     all_items_df = context.get("new_all_items_df")
     if matches_df is None or errors_df is None or all_items_df is None:
-        output6.append_stdout("Run Step 4 secondary scan first.\n")
+        save_secondary_scan_output.append_stdout("Run Step 4 secondary scan first.\n")
         return {"status": "warning", "message": "Secondary save skipped. Run Step 4 first."}
 
     export_targets = []
@@ -1394,7 +1400,7 @@ def save_secondary_scan_outputs_btn(button):
 
     if not matches_df.empty:
         matches_path = resolve_output_path(
-            input6_secondary_matches.value if input6_secondary_matches is not None else None,
+            secondary_matches_path_input.value if secondary_matches_path_input is not None else None,
             "secondary_scan_matches.csv",
         )
         export_targets.append(("Matches CSV", matches_df, matches_path))
@@ -1403,7 +1409,7 @@ def save_secondary_scan_outputs_btn(button):
 
     if not errors_df.empty:
         errors_path = resolve_output_path(
-            input6_secondary_errors.value if input6_secondary_errors is not None else None,
+            secondary_errors_path_input.value if secondary_errors_path_input is not None else None,
             "secondary_scan_errors.csv",
         )
         export_targets.append(("Errors CSV", errors_df, errors_path))
@@ -1412,7 +1418,7 @@ def save_secondary_scan_outputs_btn(button):
 
     if not all_items_df.empty:
         all_items_path = resolve_output_path(
-            input6_secondary_all_items.value if input6_secondary_all_items is not None else None,
+            secondary_all_items_path_input.value if secondary_all_items_path_input is not None else None,
             "secondary_scan_all_items.csv",
         )
         export_targets.append(("All items CSV", all_items_df, all_items_path))
@@ -1420,34 +1426,34 @@ def save_secondary_scan_outputs_btn(button):
         skipped_targets.append("All items CSV")
 
     if not export_targets:
-        output6.append_stdout("Nothing to export. All secondary scan output tables are empty.\n")
+        save_secondary_scan_output.append_stdout("Nothing to export. All secondary scan output tables are empty.\n")
         return {"status": "warning", "message": "Secondary save skipped. No secondary rows to export."}
 
-    output6.append_stdout("Saved files:\n")
+    save_secondary_scan_output.append_stdout("Saved files:\n")
     for _label, dataframe, target_path in export_targets:
         dataframe.to_csv(target_path, index=False)
-        output6.append_stdout(f"- {target_path}\n")
+        save_secondary_scan_output.append_stdout(f"- {target_path}\n")
 
     if skipped_targets:
         for label in skipped_targets:
-            output6.append_stdout(f"{_empty_output_message(label)}\n")
+            save_secondary_scan_output.append_stdout(f"{_empty_output_message(label)}\n")
 
 def export_dry_run_btn(_button):
     context = _ctx()
-    output9 = context.get("output9")
-    if output9 is None:
-        raise RuntimeError("context['output9'] is not configured.")
+    dry_run_export_output = context.get("dry_run_export_output")
+    if dry_run_export_output is None:
+        raise RuntimeError("context['dry_run_export_output'] is not configured.")
 
-    output9.clear_output()
+    dry_run_export_output.clear_output()
     plan_df = context.get("plan_df")
     if plan_df is None:
-        output9.append_stdout("Do a dry-run first.\n")
+        dry_run_export_output.append_stdout("Do a dry-run first.\n")
         return
 
-    input9_csv_name = context.get("input9_csv_name")
+    dry_run_export_path_input = context.get("dry_run_export_path_input")
     csv_name = "dry_run_results.csv"
-    if input9_csv_name is not None:
-        entered = (input9_csv_name.value or "").strip()
+    if dry_run_export_path_input is not None:
+        entered = (dry_run_export_path_input.value or "").strip()
         if entered:
             csv_name = entered
     if not csv_name.lower().endswith(".csv"):
@@ -1455,50 +1461,50 @@ def export_dry_run_btn(_button):
 
     csv_path = resolve_output_path(csv_name, "dry_run_results.csv")
     plan_df.to_csv(csv_path, index=False)
-    output9.append_stdout(f"Saved file: {csv_path}\n")
+    dry_run_export_output.append_stdout(f"Saved file: {csv_path}\n")
 
 def create_report_btn(_button):
     context = _ctx()
-    output10 = context.get("output10")
-    input10_report_name = context.get("input10_report_name")
-    input10_selection_json = context.get("input10_selection_json")
-    input10_limit = context.get("input10_limit")
-    if output10 is None:
-        raise RuntimeError("context['output10'] is not configured.")
+    create_report_output = context.get("create_report_output")
+    report_path_input = context.get("report_path_input")
+    selection_json_name_input = context.get("selection_json_name_input")
+    report_limit_input = context.get("report_limit_input")
+    if create_report_output is None:
+        raise RuntimeError("context['create_report_output'] is not configured.")
 
-    output10.clear_output()
+    create_report_output.clear_output()
     plan_df = context.get("plan_df")
     if plan_df is None:
-        output10.append_stdout("Do a dry-run before creating the report.\n")
+        create_report_output.append_stdout("Do a dry-run before creating the report.\n")
         return
 
     try:
         max_rows = _parse_optional_positive_int(
-            input10_limit.value if input10_limit is not None else None,
+            report_limit_input.value if report_limit_input is not None else None,
             "Optional match cap",
         )
     except ValueError as exc:
-        output10.append_stdout(f"{exc}\n")
+        create_report_output.append_stdout(f"{exc}\n")
         return
 
     report_filename = "dry_run_report.html"
-    if input10_report_name is not None and (input10_report_name.value or "").strip():
-        report_filename = input10_report_name.value.strip()
+    if report_path_input is not None and (report_path_input.value or "").strip():
+        report_filename = report_path_input.value.strip()
     if not report_filename.lower().endswith(".html"):
         report_filename = f"{report_filename}.html"
 
     selection_json_name = "selected_item_ids.json"
-    if input10_selection_json is not None and (input10_selection_json.value or "").strip():
-        selection_json_name = input10_selection_json.value.strip()
+    if selection_json_name_input is not None and (selection_json_name_input.value or "").strip():
+        selection_json_name = selection_json_name_input.value.strip()
     if not selection_json_name.lower().endswith(".json"):
         selection_json_name = f"{selection_json_name}.json"
 
     plan_for_report = plan_df.copy()
     if max_rows is None:
-        output10.append_stdout("Creating report for all planned updates...\n")
+        create_report_output.append_stdout("Creating report for all planned updates...\n")
     else:
         plan_for_report = plan_for_report[plan_for_report["will_update"] == True].head(max_rows).copy()
-        output10.append_stdout(f"Creating report with a match cap of {max_rows} planned update rows...\n")
+        create_report_output.append_stdout(f"Creating report with a match cap of {max_rows} planned update rows...\n")
 
     report_path = build_side_by_side_report(
         plan_for_report,
@@ -1508,46 +1514,51 @@ def create_report_btn(_button):
         selection_out_json=Path(selection_json_name).name,
     )
     context["report_path"] = report_path
-    output10.append_stdout(f"Report saved to: {report_path}\n")
+    create_report_output.append_stdout(f"Report saved to: {report_path}\n")
     embedded = display_embedded_html_report(
         report_path,
         height_px=760,
-        output_widget=output10,
+        output_widget=create_report_output,
         max_inline_bytes=2 * 1024 * 1024,
     )
     if not embedded:
-        output10.append_stdout("Inline report preview unavailable.\n")
+        create_report_output.append_stdout("Inline report preview unavailable.\n")
 
     if current_env != "arcgisnotebook":
-        output10.append_display_data(HTML(f"<div style=\"margin-top:8px;\">{build_notebook_file_link(report_path, 'Open report', as_button=True)}</div>"))
+        create_report_output.append_display_data(HTML(f"<div style=\"margin-top:8px;\">{build_notebook_file_link(report_path, 'Open report', as_button=True)}</div>"))
     else:
-        output10.append_stdout(
+        create_report_output.append_stdout(
             "In ArcGIS Online, open the saved HTML report from the Files panel rather than from an output-cell button.\n"
         )
-    output10.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
-    output10.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 8.\n")
-    output10.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
+    create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
+    create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 8.\n")
+    create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
     context = _ctx()
-    output4 = context.get("output4")
-    input4_matches = context.get("input4_matches")
-    input4_errors = context.get("input4_errors")
-    input4_all_items = context.get("input4_all_items")
-    if output4 is None or input4_matches is None or input4_errors is None or input4_all_items is None:
+    reload_scan_output = context.get("reload_scan_output")
+    reload_matches_path_input = context.get("reload_matches_path_input")
+    reload_errors_path_input = context.get("reload_errors_path_input")
+    reload_all_items_path_input = context.get("reload_all_items_path_input")
+    if (
+        reload_scan_output is None
+        or reload_matches_path_input is None
+        or reload_errors_path_input is None
+        or reload_all_items_path_input is None
+    ):
         raise RuntimeError("Step 3 inputs and output must be configured.")
 
-    output4.clear_output()
+    reload_scan_output.clear_output()
 
-    matches_path = (input4_matches.value or "").strip()
-    errors_path = (input4_errors.value or "").strip()
-    all_items_path = (input4_all_items.value or "").strip()
+    matches_path = (reload_matches_path_input.value or "").strip()
+    errors_path = (reload_errors_path_input.value or "").strip()
+    all_items_path = (reload_all_items_path_input.value or "").strip()
 
     if not matches_path or not Path(matches_path).exists():
-        output4.append_stdout(f"Matches file not found: {matches_path}\n")
+        reload_scan_output.append_stdout(f"Matches file not found: {matches_path}\n")
         return
     if not all_items_path or not Path(all_items_path).exists():
-        output4.append_stdout(f"All-items file not found: {all_items_path}\n")
+        reload_scan_output.append_stdout(f"All-items file not found: {all_items_path}\n")
         return
 
     context["matches_df"] = pd.read_csv(matches_path, dtype={"item_id": str})
@@ -1559,11 +1570,11 @@ def load_previous_scan_btn(_button):
             context["errors_df"] = pd.DataFrame(columns=["username", "error"])
     else:
         context["errors_df"] = pd.DataFrame(columns=["username", "error"])
-        output4.append_stdout(f"Errors file not found or blank, using empty table: {errors_path}\n")
+        reload_scan_output.append_stdout(f"Errors file not found or blank, using empty table: {errors_path}\n")
 
     context["all_items_df"] = pd.read_csv(all_items_path, dtype={"item_id": str})
 
-    output4.append_stdout(
+    reload_scan_output.append_stdout(
         f"Reloaded: matches={len(context['matches_df'])}, "
         f"errors={len(context['errors_df'])}, "
         f"all_items={len(context['all_items_df'])}\n"
@@ -1573,30 +1584,30 @@ def load_previous_scan_btn(_button):
 
 def run_dry_run_with_file_btn(_button):
     context = _ctx()
-    input8 = context.get("input8")
-    if input8 is None:
-        raise RuntimeError("context['input8'] is not configured.")
+    dry_run_template_path_input = context.get("dry_run_template_path_input")
+    if dry_run_template_path_input is None:
+        raise RuntimeError("context['dry_run_template_path_input'] is not configured.")
 
-    entered = (input8.value or "").strip()
+    entered = (dry_run_template_path_input.value or "").strip()
     context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
     dry_run_btn(_button)
 
 
 def preview_dry_run_match_btn(_button):
     context = _ctx()
-    output8_preview = context.get("output8_preview")
-    if output8_preview is None:
-        raise RuntimeError("context['output8_preview'] is not configured.")
+    dry_run_preview_output = context.get("dry_run_preview_output")
+    if dry_run_preview_output is None:
+        raise RuntimeError("context['dry_run_preview_output'] is not configured.")
 
-    output8_preview.clear_output()
+    dry_run_preview_output.clear_output()
 
     matches_df = context.get("matches_df")
     if matches_df is None:
-        output8_preview.append_stdout("Run Step 2 or load saved scan files first.\n")
+        dry_run_preview_output.append_stdout("Run Step 2 or load saved scan files first.\n")
         return
 
-    input8 = context.get("input8")
-    entered = (input8.value or "").strip() if input8 is not None else ""
+    dry_run_template_path_input = context.get("dry_run_template_path_input")
+    entered = (dry_run_template_path_input.value or "").strip() if dry_run_template_path_input is not None else ""
     context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
 
     checkbox8 = context.get("checkbox8")
@@ -1608,7 +1619,7 @@ def preview_dry_run_match_btn(_button):
 
     if to_update.empty:
         mode_label = "strict" if strict_match else "default"
-        output8_preview.append_stdout(
+        dry_run_preview_output.append_stdout(
             f"No updatable rows were found for the current {mode_label} matching mode, so there is nothing to preview.\n"
         )
         return
@@ -1617,16 +1628,16 @@ def preview_dry_run_match_btn(_button):
     matched_html = _extract_tou_match_fragment(first_row.get("old_licenseInfo"), strict_match=strict_match)
     if not matched_html:
         matched_html = first_row.get("old_licenseInfo") or ""
-        output8_preview.append_stdout(
+        dry_run_preview_output.append_stdout(
             "Could not isolate the matched block exactly, so the preview is showing the full existing Terms of Use HTML for the first updatable row.\n"
         )
     else:
-        output8_preview.append_stdout(
+        dry_run_preview_output.append_stdout(
             "Previewing the first updatable row using the current matching mode.\n"
         )
 
     display_dry_run_iframe_preview(
-        output8_preview,
+        dry_run_preview_output,
         matched_html=matched_html,
         replacement_html=replacement_tou,
         item_title=first_row.get("title") or "",
@@ -1640,17 +1651,17 @@ def preview_dry_run_match_btn(_button):
 
 def export_final_results_btn(_button):
     context = _ctx()
-    output12 = context.get("output12")
-    input12_success_csv = context.get("input12_success_csv")
-    input12_errors_csv = context.get("input12_errors_csv")
-    if output12 is None:
-        raise RuntimeError("context['output12'] is not configured.")
+    export_final_results_output = context.get("export_final_results_output")
+    edit_successes_path_input = context.get("edit_successes_path_input")
+    edit_errors_path_input = context.get("edit_errors_path_input")
+    if export_final_results_output is None:
+        raise RuntimeError("context['export_final_results_output'] is not configured.")
 
-    output12.clear_output()
+    export_final_results_output.clear_output()
     success_df = context.get("success_df")
     update_errors_df = context.get("update_errors_df")
     if success_df is None or update_errors_df is None:
-        output12.append_stdout("Run Step 8 first to create the export data.\n")
+        export_final_results_output.append_stdout("Run Step 8 first to create the export data.\n")
         return
 
     export_targets = []
@@ -1658,7 +1669,7 @@ def export_final_results_btn(_button):
 
     if not success_df.empty:
         success_path = resolve_output_path(
-            input12_success_csv.value if input12_success_csv is not None else None,
+            edit_successes_path_input.value if edit_successes_path_input is not None else None,
             "update_successes.csv",
         )
         export_targets.append(("Success CSV", success_df, success_path))
@@ -1667,7 +1678,7 @@ def export_final_results_btn(_button):
 
     if not update_errors_df.empty:
         errors_path = resolve_output_path(
-            input12_errors_csv.value if input12_errors_csv is not None else None,
+            edit_errors_path_input.value if edit_errors_path_input is not None else None,
             "update_errors.csv",
         )
         export_targets.append(("Errors CSV", update_errors_df, errors_path))
@@ -1675,17 +1686,17 @@ def export_final_results_btn(_button):
         skipped_targets.append("Errors CSV")
 
     if not export_targets:
-        output12.append_stdout("Nothing to export. Both final result tables are empty.\n")
+        export_final_results_output.append_stdout("Nothing to export. Both final result tables are empty.\n")
         return
 
-    output12.append_stdout("Saved files:\n")
+    export_final_results_output.append_stdout("Saved files:\n")
     for _label, dataframe, target_path in export_targets:
         dataframe.to_csv(target_path, index=False)
-        output12.append_stdout(f"- {target_path}\n")
+        export_final_results_output.append_stdout(f"- {target_path}\n")
 
     if skipped_targets:
         for label in skipped_targets:
-            output12.append_stdout(f"{_empty_output_message(label)}\n")
+            export_final_results_output.append_stdout(f"{_empty_output_message(label)}\n")
 
 # =====================================================================
 # Strict match filter
@@ -1693,20 +1704,20 @@ def export_final_results_btn(_button):
 
 def run_strict_match_filter_btn(_button):
     context = _ctx()
-    output7 = context.get("output7")
-    input7 = context.get("input7")
-    if output7 is None or input7 is None:
-        raise RuntimeError("context['output7'] and context['input7'] must be configured.")
+    exact_match_output = context.get("exact_match_output")
+    exact_match_input = context.get("exact_match_input")
+    if exact_match_output is None or exact_match_input is None:
+        raise RuntimeError("context['exact_match_output'] and context['exact_match_input'] must be configured.")
 
-    output7.clear_output()
+    exact_match_output.clear_output()
     matches_df = context.get("matches_df")
     if matches_df is None:
-        output7.append_stdout("Run Step 2 or load saved scan files first.\n")
+        exact_match_output.append_stdout("Run Step 2 or load saved scan files first.\n")
         return
 
-    exact_term = (input7.value or "").strip()
+    exact_term = (exact_match_input.value or "").strip()
     if not exact_term:
-        output7.append_stdout("Enter exact text to filter the results.\n")
+        exact_match_output.append_stdout("Enter exact text to filter the results.\n")
         return
 
     exact_url_df = matches_df[
@@ -1718,13 +1729,13 @@ def run_strict_match_filter_btn(_button):
     ].copy()
     context["exact_url_df"] = exact_url_df
 
-    output7.append_stdout(f"Exact-match results: {count_phrase(len(exact_url_df), 'item')}\n")
+    exact_match_output.append_stdout(f"Exact-match results: {count_phrase(len(exact_url_df), 'item')}\n")
     sample_count = min(len(exact_url_df), 3)
     if sample_count:
-        output7.append_stdout(f"Showing {count_phrase(sample_count, 'sample result')}:\n")
-        output7.append_display_data(exact_url_df.head(sample_count))
+        exact_match_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample result')}:\n")
+        exact_match_output.append_display_data(exact_url_df.head(sample_count))
     else:
-        output7.append_stdout("No exact-match results to display.\n")
+        exact_match_output.append_stdout("No exact-match results to display.\n")
 
 # =====================================================================
 # Dry run functions
@@ -1732,14 +1743,14 @@ def run_strict_match_filter_btn(_button):
 
 def dry_run_btn(_button):
     context = _ctx()
-    output8 = context.get("output8")
-    if output8 is None:
-        raise RuntimeError("context['output8'] is not configured.")
+    dry_run_output = context.get("dry_run_output")
+    if dry_run_output is None:
+        raise RuntimeError("context['dry_run_output'] is not configured.")
 
-    output8.clear_output()
+    dry_run_output.clear_output()
     matches_df = context.get("matches_df")
     if matches_df is None:
-        output8.append_stdout("Run Step 2 or load saved scan files first.\n")
+        dry_run_output.append_stdout("Run Step 2 or load saved scan files first.\n")
         return
 
     checkbox8 = context.get("checkbox8")
@@ -1754,23 +1765,23 @@ def dry_run_btn(_button):
     context["plan_df"] = plan_df
     context["dry_run_table"] = dry_run_table
     if strict_match:
-        output8.append_stdout(
+        dry_run_output.append_stdout(
             "Dry-run mode: strict matching enabled. Only canonical Esri Terms of Use blocks with summary and terms links in the expected order will be replaced.\n"
         )
     else:
-        output8.append_stdout(
+        dry_run_output.append_stdout(
             "Dry-run mode: default semi-greedy matching enabled. The matcher can bridge across bounded formatting differences between the logo, license text, and links.\n"
         )
-    output8.append_stdout(
+    dry_run_output.append_stdout(
         f"Dry-run summary: {count_phrase(len(plan_df), 'matched row')}, "
         f"{count_phrase(rows_would_update, 'row')} would be updated.\n"
     )
     sample_count = min(len(dry_run_table), 3)
     if sample_count:
-        output8.append_stdout(f"Showing {count_phrase(sample_count, 'sample dry-run row')}:\n")
-        output8.append_display_data(dry_run_table.head(sample_count))
+        dry_run_output.append_stdout(f"Showing {count_phrase(sample_count, 'sample dry-run row')}:\n")
+        dry_run_output.append_display_data(dry_run_table.head(sample_count))
     else:
-        output8.append_stdout("No dry-run rows to display.\n")
+        dry_run_output.append_stdout("No dry-run rows to display.\n")
     _invoke_context_callback(context, "refresh_dry_run_export_ui")
 
 # Canonical replacement block source file (overridable from notebook UI).
@@ -2287,21 +2298,21 @@ def build_side_by_side_report(
 
 def apply_updates_btn(_button):
     context = _ctx()
-    output11 = context.get("output11")
-    input11_ids = context.get("input11_ids")
-    input11_confirm = context.get("input11_confirm")
-    if output11 is None or input11_ids is None:
+    apply_edits_output = context.get("apply_edits_output")
+    selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
+    apply_edits_confirmation_input = context.get("apply_edits_confirmation_input")
+    if apply_edits_output is None or selected_ids_to_edit_path_input is None:
         raise RuntimeError("Filename.json and path must be configured before running the update.")
 
-    output11.clear_output()
+    apply_edits_output.clear_output()
     if context.get("gis") is None:
-        with output11:
+        with apply_edits_output:
             print("Please run Step 1: Setup and authenticate first.")
         return
 
     plan_df = context.get("plan_df")
     if plan_df is None:
-        with output11:
+        with apply_edits_output:
             print("Build the dry-run plan first.")
         return
 
@@ -2312,7 +2323,7 @@ def apply_updates_btn(_button):
     # Backward-compatible behavior: if user did not run the precheck button,
     # load the selection file on demand before executing updates.
     if selected_item_ids is None:
-        selected_path = resolve_existing_input_path(input11_ids.value)
+        selected_path = resolve_existing_input_path(selected_ids_to_edit_path_input.value)
         if selected_path is not None:
             try:
                 if selected_path.suffix.lower() == ".json":
@@ -2338,24 +2349,24 @@ def apply_updates_btn(_button):
             f"({count_phrase(len(selected_item_ids), 'item ID', 'item IDs')})."
         )
 
-    with output11:
+    with apply_edits_output:
         print("Execute update summary")
         for line in messages:
             print(f"- {line}")
         print("Applying updates now...")
 
-    with redirect_stdout(_OutputWidgetStdoutProxy(output11)):
+    with redirect_stdout(_OutputWidgetStdoutProxy(apply_edits_output)):
         success_df, update_errors_df = apply_licenseinfo_updates(
             context["gis"],
             plan_df,
             require_phrase="APPLY UPDATES",
             pause_seconds=0.0,
             selected_item_ids=selected_item_ids,
-            confirmation_text=(input11_confirm.value if input11_confirm is not None else None),
+            confirmation_text=(apply_edits_confirmation_input.value if apply_edits_confirmation_input is not None else None),
         )
     context["success_df"] = success_df
     context["update_errors_df"] = update_errors_df
-    with output11:
+    with apply_edits_output:
         print(
             f"Update attempt complete: {count_phrase(len(success_df), 'success')} | "
             f"{count_phrase(len(update_errors_df), 'error')}"
@@ -2371,26 +2382,26 @@ def apply_updates_btn(_button):
 def load_update_selection_btn(_button):
     """Step 8 precheck: load selection file and preview update count before execute."""
     context = _ctx()
-    output11 = context.get("output11")
-    input11_ids = context.get("input11_ids")
-    if output11 is None or input11_ids is None:
+    apply_edits_output = context.get("apply_edits_output")
+    selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
+    if apply_edits_output is None or selected_ids_to_edit_path_input is None:
         raise RuntimeError("Step 8 selection input and output must be configured.")
 
-    output11.clear_output()
+    apply_edits_output.clear_output()
     if context.get("gis") is None:
-        with output11:
+        with apply_edits_output:
             print("Please run Step 1: Setup and authenticate first.")
         return
 
     plan_df = context.get("plan_df")
     if plan_df is None:
-        with output11:
+        with apply_edits_output:
             print("Build the dry-run plan first.")
         return
 
     messages = []
     selected_item_ids = None
-    selected_path = resolve_existing_input_path(input11_ids.value)
+    selected_path = resolve_existing_input_path(selected_ids_to_edit_path_input.value)
     if selected_path is not None:
         try:
             if selected_path.suffix.lower() == ".json":
@@ -2422,7 +2433,7 @@ def load_update_selection_btn(_button):
     context["selected_item_ids_for_update"] = selected_item_ids
     context["selected_item_ids_for_update_path"] = str(selected_path) if selected_path is not None else None
 
-    with output11:
+    with apply_edits_output:
         print("Precheck summary")
         for line in messages:
             print(f"- {line}")

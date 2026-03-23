@@ -18,10 +18,10 @@ Use this as the implementation queue for the simplification work. Complete Batch
 
 ### Batch 1 Status
 
-- [ ] B1-01 Rename setup/auth and primary-scan keys to semantic names
-- [ ] B1-02 Rename save/reload-scan keys to semantic names
-- [ ] B1-03 Complete positional-name sweep and lock naming baseline
-- [ ] B1-04 Admin-first copy update and matcher explanation tightening
+- [x] B1-01 Rename setup/auth and primary-scan keys to semantic names
+- [x] B1-02 Rename save/reload-scan keys to semantic names
+- [x] B1-03 Complete positional-name sweep and lock naming baseline
+- [x] B1-04 Admin-first copy update and matcher explanation tightening
 
 ### Batch 2 Status
 
