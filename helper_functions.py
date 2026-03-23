@@ -2296,7 +2296,7 @@ def apply_updates_btn(_button):
                     )
             except Exception as exc:
                 messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
-                messages.append("Continuing without a selection filter.")
+                messages.append("Continuing with the full scan results.")
                 selected_item_ids = None
         else:
             messages.append("No selected IDs file was found. Applying updates to all rows where will_update=True.")
@@ -2385,7 +2385,7 @@ def load_update_selection_btn(_button):
                 )
         except Exception as exc:
             messages.append(f"Could not load selected IDs file ({selected_path}): {exc}")
-            messages.append("Continuing without a selection filter.")
+            messages.append("Continuing with the full scan results.")
             selected_item_ids = None
     else:
         messages.append("No selected IDs file was found. Applying updates to all candidate items.")
@@ -2395,7 +2395,7 @@ def load_update_selection_btn(_button):
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        messages.append(f"Selection filter applied. {count_phrase(len(to_update), 'row')} selected for update.")
+        messages.append(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for update.")
 
     context["selected_item_ids_for_update"] = selected_item_ids
     context["selected_item_ids_for_update_path"] = str(selected_path) if selected_path is not None else None
@@ -2444,7 +2444,7 @@ def apply_licenseinfo_updates(
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        print(f"Selection filter applied. {count_phrase(len(to_update), 'row')} selected for update.")
+        print(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for update.")
 
     if to_update.empty:
         print("Nothing to update.")
