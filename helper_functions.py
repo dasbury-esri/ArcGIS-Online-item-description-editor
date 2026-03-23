@@ -2335,7 +2335,7 @@ def apply_updates_btn(_button):
         print("Applying updates now...")
 
     with redirect_stdout(_OutputWidgetStdoutProxy(apply_edits_output)):
-        success_df, update_errors_df = apply_licenseinfo_updates(
+        success_df, update_errors_df, rollback_snapshot_df = apply_licenseinfo_updates(
             context["gis"],
             plan_df,
             require_phrase="APPLY UPDATES",
@@ -2345,6 +2345,16 @@ def apply_updates_btn(_button):
         )
     context["success_df"] = success_df
     context["update_errors_df"] = update_errors_df
+    context["rollback_snapshot_df"] = rollback_snapshot_df
+
+    if rollback_snapshot_df is not None and not rollback_snapshot_df.empty:
+        snapshot_path = resolve_output_path("rollback_snapshot.csv", "rollback_snapshot.csv")
+        rollback_snapshot_df.to_csv(snapshot_path, index=False)
+        context["rollback_snapshot_path"] = str(snapshot_path)
+        with apply_edits_output:
+            print(f"Rollback snapshot saved: {snapshot_path}")
+
+    _invoke_context_callback(context, "refresh_rollback_export_ui")
     with apply_edits_output:
         print(
             f"Update attempt complete: {count_phrase(len(success_df), 'success')} | "
@@ -2449,6 +2459,7 @@ def apply_licenseinfo_updates(
     RETURNS
     success_df: DataFrame of successfully updated items with columns for item_id, title, owner, and type
     errors_df: DataFrame of any errors encountered during updates with columns for item_id, title, and error message
+    rollback_snapshot_df: DataFrame of pre-edit snapshots for rows that were successfully updated
     """
     to_update = plan_df[plan_df["will_update"] == True].copy()
 
@@ -2459,7 +2470,7 @@ def apply_licenseinfo_updates(
 
     if to_update.empty:
         print("Nothing to update.")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     print(f"WARNING: You are about to update {count_phrase(len(to_update), 'item')}.")
     print(f"If you want to continue, type {require_phrase}. Type anything else to cancel.")
@@ -2472,14 +2483,15 @@ def apply_licenseinfo_updates(
         except EOFError:
             print("Update canceled: this notebook runtime does not support interactive input() from button callbacks.")
             print(f"Use the confirmation input field and type exactly: {require_phrase}")
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     if typed != require_phrase:
         print("Update canceled.")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     success_rows = []
     error_rows = []
+    rollback_snapshot_rows = []
 
     for i, row in enumerate(to_update.itertuples(index=False), start=1):
         item_id = row.item_id
@@ -2487,6 +2499,8 @@ def apply_licenseinfo_updates(
             item = gis.content.get(item_id)
             if item is None:
                 raise ValueError("Item not found")
+
+            pre_edit_licenseinfo = item.licenseInfo if hasattr(item, "licenseInfo") else ""
 
             ok = item.update(item_properties={"licenseInfo": row.new_licenseInfo})
             if not ok:
@@ -2497,6 +2511,16 @@ def apply_licenseinfo_updates(
                 "title": row.title,
                 "owner": row.owner,
                 "type": row.type
+            })
+
+            rollback_snapshot_rows.append({
+                "item_id": item_id,
+                "title": row.title,
+                "owner": row.owner,
+                "type": row.type,
+                "pre_edit_licenseInfo": pre_edit_licenseinfo,
+                "applied_licenseInfo": row.new_licenseInfo,
+                "snapshot_captured_utc": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
             })
 
         except Exception as exc:
@@ -2516,9 +2540,278 @@ def apply_licenseinfo_updates(
 
     success_df = pd.DataFrame(success_rows)
     errors_df = pd.DataFrame(error_rows)
+    rollback_snapshot_df = pd.DataFrame(rollback_snapshot_rows)
 
     print(
         f"Update results: {count_phrase(len(success_df), 'success')} | "
         f"{count_phrase(len(errors_df), 'error')}"
     )
-    return success_df, errors_df
+    return success_df, errors_df, rollback_snapshot_df
+
+
+def parse_item_ids_text(raw_text):
+    """Parse item IDs from comma, whitespace, or newline separated text."""
+    text = str(raw_text or "").strip()
+    if not text:
+        return []
+    values = re.split(r"[\s,]+", text)
+    return [v.strip() for v in values if v and v.strip()]
+
+
+def _load_item_ids_from_file(path_value):
+    """Load item IDs from JSON or CSV file and return a list of string IDs."""
+    input_path = resolve_existing_input_path(path_value)
+    if input_path is None:
+        return [], None, "No ID file was found; continuing with manual IDs only."
+
+    loaded_ids = []
+    suffix = input_path.suffix.lower()
+    if suffix == ".json":
+        payload = json.loads(input_path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            loaded_ids = [str(x).strip() for x in payload if str(x).strip()]
+    elif suffix == ".csv":
+        loaded_df = pd.read_csv(input_path, dtype=str)
+        if "item_id" in loaded_df.columns:
+            loaded_ids = loaded_df["item_id"].dropna().astype(str).str.strip().tolist()
+    else:
+        return [], str(input_path), f"Unsupported ID file type: {input_path.suffix}. Use .json or .csv."
+
+    return loaded_ids, str(input_path), None
+
+
+def load_rollback_snapshot_btn(_button):
+    """Load rollback snapshot CSV into context for preview and execution."""
+    context = _ctx()
+    rollback_output = context.get("rollback_output")
+    snapshot_path_input = context.get("rollback_snapshot_path_input")
+    if rollback_output is None or snapshot_path_input is None:
+        raise RuntimeError("Rollback output and snapshot path input must be configured.")
+
+    rollback_output.clear_output()
+    snapshot_path = resolve_existing_input_path(snapshot_path_input.value)
+    if snapshot_path is None:
+        rollback_output.append_stdout("Rollback snapshot file not found. Run Step 6 first or provide a valid snapshot path.\n")
+        return
+
+    snapshot_df = pd.read_csv(snapshot_path, dtype={"item_id": str})
+    required_cols = ["item_id", "pre_edit_licenseInfo"]
+    missing = [c for c in required_cols if c not in snapshot_df.columns]
+    if missing:
+        rollback_output.append_stdout(f"Snapshot file is missing required columns: {missing}\n")
+        return
+
+    context["rollback_snapshot_df"] = snapshot_df
+    context["rollback_snapshot_path"] = str(snapshot_path)
+    rollback_output.append_stdout(f"Loaded rollback snapshot rows: {len(snapshot_df)} from {snapshot_path}\n")
+
+
+def preview_rollback_btn(_button):
+    """Preview targeted rollback rows using manual and/or file-based item IDs."""
+    context = _ctx()
+    rollback_output = context.get("rollback_output")
+    rollback_ids_text_input = context.get("rollback_ids_text_input")
+    rollback_ids_file_path_input = context.get("rollback_ids_file_path_input")
+    if rollback_output is None:
+        raise RuntimeError("Rollback output must be configured.")
+
+    rollback_output.clear_output()
+    snapshot_df = context.get("rollback_snapshot_df")
+    if snapshot_df is None or snapshot_df.empty:
+        rollback_output.append_stdout("No rollback snapshot is loaded. Run Step 6 first or load a snapshot file.\n")
+        return
+
+    manual_ids = parse_item_ids_text(rollback_ids_text_input.value if rollback_ids_text_input is not None else "")
+    file_ids, file_path_used, file_error = _load_item_ids_from_file(
+        rollback_ids_file_path_input.value if rollback_ids_file_path_input is not None else ""
+    )
+    if file_error:
+        rollback_output.append_stdout(f"{file_error}\n")
+
+    targeted_ids = {str(x).strip() for x in (manual_ids + file_ids) if str(x).strip()}
+
+    rollback_plan_df = snapshot_df.copy()
+    if targeted_ids:
+        rollback_plan_df = rollback_plan_df[rollback_plan_df["item_id"].astype(str).isin(targeted_ids)].copy()
+        rollback_output.append_stdout(
+            f"Rollback target filter applied from manual/file IDs: {count_phrase(len(rollback_plan_df), 'row')} selected.\n"
+        )
+    else:
+        rollback_output.append_stdout("No target IDs provided. Previewing rollback for all snapshot rows.\n")
+
+    if file_path_used:
+        rollback_output.append_stdout(f"Loaded ID file: {file_path_used}\n")
+
+    context["rollback_plan_df"] = rollback_plan_df
+    context["rollback_target_item_ids"] = sorted(targeted_ids)
+
+    if rollback_plan_df.empty:
+        rollback_output.append_stdout("Nothing to rollback for the selected criteria.\n")
+        return
+
+    rollback_output.append_stdout(f"Rollback preview: {count_phrase(len(rollback_plan_df), 'row')} would be reverted.\n")
+    preview_cols = [c for c in ["item_id", "title", "owner", "type"] if c in rollback_plan_df.columns]
+    if preview_cols:
+        rollback_output.append_display_data(rollback_plan_df[preview_cols].head(3))
+
+
+def execute_rollback_btn(_button):
+    """Execute targeted rollback after explicit confirmation phrase validation."""
+    context = _ctx()
+    rollback_output = context.get("rollback_output")
+    rollback_confirmation_input = context.get("rollback_confirmation_input")
+    if rollback_output is None:
+        raise RuntimeError("Rollback output must be configured.")
+
+    rollback_output.clear_output()
+    if context.get("gis") is None:
+        rollback_output.append_stdout("Please run Step 1: Setup and authenticate first.\n")
+        return
+
+    rollback_plan_df = context.get("rollback_plan_df")
+    if rollback_plan_df is None or rollback_plan_df.empty:
+        rollback_output.append_stdout("No rollback plan is loaded. Click Preview rollback first.\n")
+        return
+
+    phrase = str(rollback_confirmation_input.value if rollback_confirmation_input is not None else "").strip()
+    if phrase != "APPLY ROLLBACK":
+        rollback_output.append_stdout("Rollback canceled. Type APPLY ROLLBACK to confirm.\n")
+        return
+
+    success_rows = []
+    error_rows = []
+    for row in rollback_plan_df.itertuples(index=False):
+        item_id = getattr(row, "item_id", None)
+        try:
+            item = context["gis"].content.get(item_id)
+            if item is None:
+                raise ValueError("Item not found")
+
+            ok = item.update(item_properties={"licenseInfo": getattr(row, "pre_edit_licenseInfo", "")})
+            if not ok:
+                raise RuntimeError("item.update returned False")
+
+            success_rows.append({
+                "item_id": item_id,
+                "title": getattr(row, "title", None),
+                "owner": getattr(row, "owner", None),
+                "type": getattr(row, "type", None),
+            })
+        except Exception as exc:
+            error_rows.append({
+                "item_id": item_id,
+                "title": getattr(row, "title", None),
+                "owner": getattr(row, "owner", None),
+                "type": getattr(row, "type", None),
+                "error": str(exc),
+            })
+
+    rollback_success_df = pd.DataFrame(success_rows)
+    rollback_errors_df = pd.DataFrame(error_rows)
+    context["rollback_success_df"] = rollback_success_df
+    context["rollback_errors_df"] = rollback_errors_df
+    _invoke_context_callback(context, "refresh_rollback_export_ui")
+
+    rollback_output.append_stdout(
+        f"Rollback results: {count_phrase(len(rollback_success_df), 'success')} | {count_phrase(len(rollback_errors_df), 'error')}\n"
+    )
+    if not rollback_success_df.empty:
+        rollback_output.append_display_data(rollback_success_df.head(3))
+
+
+def refresh_rollback_export_ui():
+    """Refresh rollback export controls based on rollback execution results."""
+    context = _ctx()
+    rollback_export_container = context.get("rollback_export_container")
+    rollback_results_path_input = context.get("rollback_results_path_input")
+    rollback_export_button = context.get("rollback_export_button")
+    rollback_export_status = context.get("rollback_export_status")
+    rollback_export_output = context.get("rollback_export_output")
+    if rollback_export_container is None:
+        return
+
+    success_df = context.get("rollback_success_df")
+    errors_df = context.get("rollback_errors_df")
+    has_rows = (
+        success_df is not None
+        and errors_df is not None
+        and (not success_df.empty or not errors_df.empty)
+    )
+
+    children = []
+    if has_rows and rollback_results_path_input is not None and rollback_export_button is not None and rollback_export_status is not None:
+        children.append(rollback_results_path_input)
+        children.append(widgets.HBox([rollback_export_button, rollback_export_status]))
+    else:
+        children.append(
+            widgets.HTML(
+                value="<div style='margin:0; padding:0;'>No rollback results are available to export yet.</div>"
+            )
+        )
+
+    if rollback_export_output is not None:
+        children.append(rollback_export_output)
+    rollback_export_container.children = tuple(children)
+
+
+def export_rollback_results_btn(_button):
+    """Export rollback execution results to a combined CSV with status labels."""
+    context = _ctx()
+    rollback_export_output = context.get("rollback_export_output")
+    rollback_results_path_input = context.get("rollback_results_path_input")
+    if rollback_export_output is None or rollback_results_path_input is None:
+        raise RuntimeError("Rollback export controls are not fully configured.")
+
+    rollback_export_output.clear_output()
+    rollback_success_df = context.get("rollback_success_df")
+    rollback_errors_df = context.get("rollback_errors_df")
+    if rollback_success_df is None or rollback_errors_df is None:
+        rollback_export_output.append_stdout("Run rollback first to create export data.\n")
+        return
+
+    combined_df = _build_combined_rollback_results(rollback_success_df, rollback_errors_df)
+    if combined_df.empty:
+        rollback_export_output.append_stdout("Nothing to export. Both rollback result tables are empty.\n")
+        return
+
+    output_path = resolve_output_path(rollback_results_path_input.value, "rollback_results.csv")
+    combined_df.to_csv(output_path, index=False)
+    rollback_export_output.append_stdout(
+        f"Saved file: {output_path}\n"
+        f"Rows exported: {len(combined_df)} ("
+        f"{count_phrase(int((combined_df['status'] == 'rollback_success').sum()), 'success')}, "
+        f"{count_phrase(int((combined_df['status'] == 'rollback_error').sum()), 'error')})\n"
+    )
+
+
+def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
+    """Build a single status-labeled rollback-results table from success and error rows."""
+    preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
+
+    success_export = rollback_success_df.copy()
+    if success_export.empty:
+        success_export = pd.DataFrame(columns=preferred_cols)
+    else:
+        for col in ("item_id", "title", "owner", "type"):
+            if col not in success_export.columns:
+                success_export[col] = ""
+        success_export["status"] = "rollback_success"
+        success_export["error"] = ""
+
+    error_export = rollback_errors_df.copy()
+    if error_export.empty:
+        error_export = pd.DataFrame(columns=preferred_cols)
+    else:
+        for col in ("item_id", "title", "owner", "type"):
+            if col not in error_export.columns:
+                error_export[col] = ""
+        if "error" not in error_export.columns:
+            error_export["error"] = ""
+        error_export["status"] = "rollback_error"
+
+    combined_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
+    if combined_df.empty:
+        return pd.DataFrame(columns=preferred_cols)
+
+    ordered_cols = preferred_cols + [c for c in combined_df.columns if c not in preferred_cols]
+    return combined_df[ordered_cols]
