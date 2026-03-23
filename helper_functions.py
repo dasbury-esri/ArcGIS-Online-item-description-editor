@@ -1239,7 +1239,7 @@ def refresh_scan_save_ui():
     if all_items_df is not None and not all_items_df.empty:
         has_any_rows = True
 
-    children = [widgets.HTML(value="<div style='margin-top:12px; font-weight:600;'>Optional: Save combined scan outputs to save time in a future run.</div>")]
+    children = [widgets.HTML(value="<div style='margin-top:12px; font-weight:600;'>Optional: Save scan outputs to save time in a future run.</div>")]
     if has_any_rows and scan_results_path_input is not None and save_scan_button is not None and save_scan_status is not None:
         children.append(scan_results_path_input)
         children.append(widgets.HBox([save_scan_button, save_scan_status]))
@@ -1283,7 +1283,7 @@ def refresh_dry_run_export_ui():
     dry_run_export_container.children = tuple(children)
 
 def save_scan_outputs_btn(button):
-    """Save scan outputs to one combined CSV with row status labels.
+    """Save scan outputs to a CSV with row status labels.
 
     PARAMS
     button: ipywidgets button event payload (unused)
@@ -1491,7 +1491,7 @@ def create_report_btn(_button):
     create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
-    """Load scan results from a combined CSV and repopulate scan context tables."""
+    """Load scan results from a CSV and repopulate scan context tables."""
     context = _ctx()
     reload_scan_output = context.get("reload_scan_output")
     reload_scan_results_path_input = context.get("reload_scan_results_path_input")
@@ -1502,14 +1502,14 @@ def load_previous_scan_btn(_button):
 
     combined_path = (reload_scan_results_path_input.value or "").strip()
     if not combined_path or not Path(combined_path).exists():
-        reload_scan_output.append_stdout(f"Combined scan file not found: {combined_path}\n")
+        reload_scan_output.append_stdout(f"Input file not found: {combined_path}\n")
         return
 
     combined_df = pd.read_csv(combined_path, dtype={"item_id": str})
     status_series = combined_df.get("status")
     if status_series is None:
         reload_scan_output.append_stdout(
-            "Combined scan file is missing required 'status' column.\n"
+            "Input file is missing required 'status' column.\n"
         )
         return
 
@@ -1542,7 +1542,7 @@ def load_previous_scan_btn(_button):
     context["all_items_df"] = all_items_df[expected_all_item_cols]
 
     reload_scan_output.append_stdout(
-        f"Reloaded from combined file: matches={len(context['matches_df'])}, "
+        f"Reloaded from input file: matches={len(context['matches_df'])}, "
         f"errors={len(context['errors_df'])}, "
         f"all_items={len(context['all_items_df'])}\n"
     )
@@ -1619,7 +1619,7 @@ def preview_dry_run_match_btn(_button):
     )
 
 def export_final_results_btn(_button):
-    """Export final update outcomes to one combined CSV with status labels."""
+    """Export final update outcomes to a CSV with status labels."""
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
     final_results_path_input = context.get("final_results_path_input")
@@ -1654,7 +1654,7 @@ def export_final_results_btn(_button):
 
 
 def _build_combined_update_results(success_df, update_errors_df):
-    """Build a single status-labeled update-results table from success and error rows."""
+    """Build a status-labeled update-results table from success and error rows."""
     preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
 
     success_export = success_df.copy()
@@ -2727,7 +2727,7 @@ def refresh_rollback_export_ui():
 
 
 def export_rollback_results_btn(_button):
-    """Export rollback execution results to a combined CSV with status labels."""
+    """Export rollback execution results to a CSV with status labels."""
     context = _ctx()
     rollback_export_output = context.get("rollback_export_output")
     rollback_results_path_input = context.get("rollback_results_path_input")
