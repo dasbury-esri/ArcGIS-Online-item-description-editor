@@ -16,15 +16,15 @@ Add optional rollback with targeted undo and validate both baseline and remediat
 - [x] Targeted rollback affects only selected item IDs
 - [x] Undo preview and confirmation prevent accidental rollback
 - [x] Apply and rollback both generate auditable success/error exports
-- [ ] Pass A succeeds: scan -> dry run -> report -> apply -> export
+- [x] Pass A succeeds: scan -> dry run -> report -> apply -> export
 - [ ] Pass B succeeds: scan -> dry run -> report -> apply -> undo -> export
 
 ## Session Log
 
 - Date: 2026-03-23
 - Completed tickets: B3-01, B3-02, B3-03, B3-04
-- Blockers: Full end-to-end validation in live AGO org not executed in this session.
-- Next action: Run Pass A and Pass B in notebook runtime against org content and capture output artifacts.
+- Blockers: Pass B end-to-end validation is still pending.
+- Next action: Run Pass B in notebook runtime against org content and capture output artifacts.
 
 ## Post-Batch Feature Additions
 
