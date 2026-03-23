@@ -1479,8 +1479,8 @@ def preview_dry_run_match_btn(_button):
     entered = (dry_run_template_path_input.value or "").strip() if dry_run_template_path_input is not None else ""
     context["official_tou_html_file"] = entered or OFFICIAL_TOU_HTML_FILE
 
-    checkbox8 = context.get("checkbox8")
-    strict_match = bool(checkbox8.value) if checkbox8 is not None else False
+    strict_match_checkbox = context.get("strict_match_checkbox")
+    strict_match = bool(strict_match_checkbox.value) if strict_match_checkbox is not None else False
 
     replacement_tou = load_official_tou_html(context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE))
     plan_df = build_licenseinfo_update_plan(matches_df, replacement_tou, strict_match=strict_match)
@@ -1599,8 +1599,8 @@ def dry_run_btn(_button):
         dry_run_output.append_stdout("Run Step 2 or load saved scan files first.\n")
         return
 
-    checkbox8 = context.get("checkbox8")
-    strict_match = bool(checkbox8.value) if checkbox8 is not None else False
+    strict_match_checkbox = context.get("strict_match_checkbox")
+    strict_match = bool(strict_match_checkbox.value) if strict_match_checkbox is not None else False
     context["strict_match_updates"] = strict_match
 
     tou_path = context.get("official_tou_html_file", OFFICIAL_TOU_HTML_FILE)
