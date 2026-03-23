@@ -57,6 +57,7 @@ current_env, env_string = detect_environment()
 
 OUTPUT_DIR_NAME = "notebook_outputs"
 CSV_TIMESTAMP_SUFFIX_RE = re.compile(r"_\d{8}_\d{4}$")
+TIMESTAMP_VALUE_RE = re.compile(r"^\d{8}_\d{4}$")
 
 
 def _default_output_root():
@@ -94,9 +95,22 @@ def default_output_dir_str():
 def default_output_path_str(filename):
     """Return an absolute output path for a filename under the output directory."""
     output_path = (get_output_dir() / filename).resolve()
-    if output_path.suffix.lower() == ".csv":
-        output_path = with_csv_timestamp(output_path)
+    if output_path.suffix.lower() in {".csv", ".html", ".json"}:
+        output_path = with_timestamp_suffix(output_path, timestamp=_get_output_timestamp())
     return str(output_path)
+
+
+def _get_output_timestamp(context=None):
+    """Return a stable output timestamp for the current runtime context."""
+    active_context = context if context is not None else _RUNTIME_CONTEXT
+    if active_context is not None:
+        existing = str(active_context.get("output_timestamp") or "").strip()
+        if TIMESTAMP_VALUE_RE.match(existing):
+            return existing
+        generated = datetime.now().strftime("%Y%m%d_%H%M")
+        active_context["output_timestamp"] = generated
+        return generated
+    return datetime.now().strftime("%Y%m%d_%H%M")
 
 
 def with_csv_timestamp(path_obj):
@@ -108,20 +122,20 @@ def with_csv_timestamp(path_obj):
     if path_obj.suffix.lower() != ".csv":
         return path_obj
 
-    return with_timestamp_suffix(path_obj)
+    return with_timestamp_suffix(path_obj, timestamp=_get_output_timestamp())
 
 
-def with_timestamp_suffix(path_obj):
+def with_timestamp_suffix(path_obj, timestamp=None):
     """Return a path with filename pattern base_YYYYMMDD_HHMM.ext.
 
     If the base filename already ends with a timestamp suffix, replace it with the current timestamp.
     """
     path_obj = Path(path_obj)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    ts_value = str(timestamp or datetime.now().strftime("%Y%m%d_%H%M"))
     stem = path_obj.stem
     if CSV_TIMESTAMP_SUFFIX_RE.search(stem):
         stem = CSV_TIMESTAMP_SUFFIX_RE.sub("", stem)
-    return path_obj.with_name(f"{stem}_{timestamp}{path_obj.suffix}")
+    return path_obj.with_name(f"{stem}_{ts_value}{path_obj.suffix}")
 
 
 def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False, timestamp_output=False):
@@ -133,7 +147,7 @@ def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False,
     if timestamp_csv:
         target_path = with_csv_timestamp(target_path)
     if timestamp_output:
-        target_path = with_timestamp_suffix(target_path)
+        target_path = with_timestamp_suffix(target_path, timestamp=_get_output_timestamp())
     target_path.parent.mkdir(parents=True, exist_ok=True)
     return target_path.resolve()
 
@@ -266,8 +280,8 @@ def display_dry_run_iframe_preview(
     *,
     matched_html,
     replacement_html,
-    item_title="",
     item_id="",
+    item_title="",
     item_owner="",
     item_type="",
     matched_terms="",
@@ -1489,6 +1503,9 @@ def create_report_btn(_button):
     if not selection_json_name.lower().endswith(".json"):
         selection_json_name = f"{selection_json_name}.json"
 
+    output_timestamp = _get_output_timestamp(context)
+    selection_json_name = with_timestamp_suffix(Path(selection_json_name).name, timestamp=output_timestamp).name
+
     plan_for_report = plan_df.copy()
     if max_rows is None:
         create_report_output.append_stdout("Creating report for all planned edits...\n")
@@ -1502,6 +1519,7 @@ def create_report_btn(_button):
         only_updates=max_rows is None,
         gis=context.get("gis"),
         selection_out_json=Path(selection_json_name).name,
+        output_timestamp=output_timestamp,
     )
     context["report_path"] = report_path
     create_report_output.append_stdout(f"Report saved to: {report_path}\n")
@@ -1523,8 +1541,7 @@ def create_report_btn(_button):
     create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
     create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 6.\n")
     create_report_output.append_stdout(
-        f"When downloading item IDs from the report, the output file name will be: "
-        f"{Path(selection_json_name).stem}_YYYYMMDD_HHMM{Path(selection_json_name).suffix}\n"
+        f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n"
     )
 
 def load_previous_scan_btn(_button):
@@ -2000,7 +2017,8 @@ def build_side_by_side_report(
     report_output_path="dry_run_report.html",
     only_updates=True,
     gis=None,
-    selection_out_json="selected_item_ids.json"
+    selection_out_json="selected_item_ids.json",
+    output_timestamp=None,
 ):
         """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates.
         
@@ -2010,6 +2028,7 @@ def build_side_by_side_report(
         only_updates: if True, include only rows where will_update is True (default True)
         gis: optional authenticated GIS object, used to fetch thumbnails as data URIs for inlining; if not provided, thumbnail URLs will be constructed but may not display if authentication is required
         selection_out_json: filename for the output JSON file that will contain the list of selected item IDs
+        output_timestamp: shared timestamp string in YYYYMMDD_HHMM format used for downloadable filenames
 
         RETURNS
         report_path: the file path to the generated HTML report
@@ -2237,9 +2256,7 @@ def build_side_by_side_report(
                 }}
 
                 function timestampedFilename(baseName) {{
-                    const now = new Date();
-                    const pad = (value) => String(value).padStart(2, '0');
-                    const ts = String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes());
+                    const ts = '{escape(str(output_timestamp or datetime.now().strftime("%Y%m%d_%H%M")))}';
                     const m = String(baseName || '').match(/^(.*?)(\\.[^.]+)?$/);
                     const stem = (m && m[1]) ? m[1] : 'output';
                     const ext = (m && m[2]) ? m[2] : '';
