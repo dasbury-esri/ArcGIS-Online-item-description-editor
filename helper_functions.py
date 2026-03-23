@@ -26,6 +26,7 @@ def set_runtime_context(context):
     _RUNTIME_CONTEXT = context
 
 def _ctx():
+    """Return the active runtime context or raise if setup has not run."""
     if _RUNTIME_CONTEXT is None:
         raise RuntimeError("Runtime context is not configured. Run setup cell first.")
     return _RUNTIME_CONTEXT
@@ -58,6 +59,7 @@ OUTPUT_DIR_NAME = "notebook_outputs"
 
 
 def _default_output_root():
+    """Return the base folder used to store notebook output artifacts."""
     if current_env == "arcgisnotebook" and Path("/arcgis/home").exists():
         return Path("/arcgis/home")
     # Keep local test artifacts under a dedicated hidden folder.
@@ -72,6 +74,7 @@ BASE_DIR = DEFAULT_OUTPUT_DIR
 
 
 def get_output_dir(context=None):
+    """Resolve and create the configured output directory for the active context."""
     active_context = context if context is not None else _RUNTIME_CONTEXT
     configured_dir = None
     if active_context:
@@ -83,14 +86,17 @@ def get_output_dir(context=None):
 
 
 def default_output_dir_str():
+    """Return the default output directory as an absolute string path."""
     return str(get_output_dir())
 
 
 def default_output_path_str(filename):
+    """Return an absolute output path for a filename under the output directory."""
     return str((get_output_dir() / filename).resolve())
 
 
 def resolve_output_path(filename_or_path, default_filename):
+    """Resolve a writable output path and ensure its parent directory exists."""
     raw_value = str(filename_or_path or "").strip()
     target_path = Path(raw_value if raw_value else default_filename).expanduser()
     if not target_path.is_absolute():
@@ -100,6 +106,7 @@ def resolve_output_path(filename_or_path, default_filename):
 
 
 def resolve_existing_input_path(filename_or_path):
+    """Resolve an existing input file path from absolute, cwd-relative, or output-relative paths."""
     raw_value = str(filename_or_path or "").strip()
     if not raw_value:
         return None
@@ -113,6 +120,7 @@ def resolve_existing_input_path(filename_or_path):
 
 
 def build_notebook_file_link(path, label, as_button=False):
+    """Build a safe HTML link to a local file path for notebook display."""
     resolved_path = Path(path).resolve()
     href = resolved_path.as_uri()
 
@@ -286,6 +294,7 @@ def display_dry_run_iframe_preview(
 
 
 def count_phrase(count, singular, plural=None):
+    """Return a count + noun phrase with simple pluralization rules."""
     if count == 1:
         noun = singular
     elif plural:
@@ -300,6 +309,7 @@ def count_phrase(count, singular, plural=None):
 
 
 def _empty_output_message(label):
+    """Return the default empty-table message for an export section label."""
     messages = {
         "Matches CSV": "0 matches found.",
         "Errors CSV": "0 reported errors.",
@@ -437,6 +447,7 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
         raise ValueError("Unsupported widget_type")
 
 def _spinner_status_html(message):
+    """Return spinner markup for long-running status messages."""
     safe_message = escape(message)
     return (
         "<span style='display:inline-flex; align-items:center; gap:8px; color:#555;'>"
@@ -526,6 +537,7 @@ class ScanCancelled(RuntimeError):
 
 
 def _scan_cancel_requested(context):
+    """Return True when a scan cancellation has been requested."""
     return bool(context.get("scan_cancel_requested"))
 
 
@@ -560,6 +572,7 @@ class _OutputWidgetStdoutProxy:
 
 
 def _invoke_context_callback(context, callback_key):
+    """Invoke a context callback if it exists and is callable."""
     callback = context.get(callback_key)
     if callable(callback):
         callback()
@@ -716,6 +729,7 @@ def bind_primary_scan_with_cancel(
 
 
 def setup_notebook_btn(button):
+    """Initialize notebook runtime details and perform authentication."""
     context = _ctx()
     setup_output = context.get("setup_output")
     if setup_output is None:
@@ -741,6 +755,7 @@ def setup_notebook_btn(button):
 # ======================================================================
 
 def parse_target_terms(raw_text):
+    """Parse target terms from CSV-style text, with legacy list-string fallback."""
     text = (raw_text or "").strip()
     if not text:
         return []
@@ -771,6 +786,7 @@ def normalize_target_terms_text(terms):
     return json.dumps(list(terms), ensure_ascii=False)
 
 def run_primary_scan_btn(button):
+    """Run the primary scan flow and store scan outputs in runtime context."""
     context = _ctx()
     scan_output = context.get("scan_output")
     scan_terms_input = context.get("scan_terms_input")
@@ -1197,6 +1213,7 @@ def scan_org_licenseinfo_without_10k_cap(
 # =====================================================================
 
 def refresh_scan_save_ui():
+    """Refresh the Step 2 save section based on the current scan tables."""
     context = _ctx()
     save_scan_container = context.get("save_scan_container")
     save_scan_output = context.get("save_scan_output")
@@ -1239,6 +1256,7 @@ def refresh_scan_save_ui():
 
 
 def refresh_dry_run_export_ui():
+    """Refresh the Step 4 dry-run export section based on plan availability."""
     context = _ctx()
     dry_run_export_container = context.get("dry_run_export_container")
     dry_run_export_path_input = context.get("dry_run_export_path_input")
@@ -1265,6 +1283,14 @@ def refresh_dry_run_export_ui():
     dry_run_export_container.children = tuple(children)
 
 def save_scan_outputs_btn(button):
+    """Save scan outputs to one combined CSV with row status labels.
+
+    PARAMS
+    button: ipywidgets button event payload (unused)
+
+    RETURNS
+    None
+    """
     context = _ctx()
     save_scan_output = context.get("save_scan_output")
     scan_results_path_input = context.get("scan_results_path_input")
@@ -1303,6 +1329,7 @@ def save_scan_outputs_btn(button):
 
 
 def _build_combined_scan_results(matches_df, errors_df, all_items_df):
+    """Build a single status-labeled scan results table from scan output tables."""
     preferred_cols = [
         "item_id",
         "title",
@@ -1366,6 +1393,7 @@ def _build_combined_scan_results(matches_df, errors_df, all_items_df):
 
 
 def export_dry_run_btn(_button):
+    """Export the current dry-run plan to CSV."""
     context = _ctx()
     dry_run_export_output = context.get("dry_run_export_output")
     if dry_run_export_output is None:
@@ -1391,6 +1419,14 @@ def export_dry_run_btn(_button):
     dry_run_export_output.append_stdout(f"Saved file: {csv_path}\n")
 
 def create_report_btn(_button):
+    """Create and optionally embed the side-by-side dry-run review report.
+
+    PARAMS
+    _button: ipywidgets button event payload (unused)
+
+    RETURNS
+    None
+    """
     context = _ctx()
     create_report_output = context.get("create_report_output")
     report_path_input = context.get("report_path_input")
@@ -1462,6 +1498,14 @@ def create_report_btn(_button):
     create_report_output.append_stdout(f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n")
 
 def load_previous_scan_btn(_button):
+    """Load scan results from a combined CSV and repopulate scan context tables.
+
+    PARAMS
+    _button: ipywidgets button event payload (unused)
+
+    RETURNS
+    None
+    """
     context = _ctx()
     reload_scan_output = context.get("reload_scan_output")
     reload_scan_results_path_input = context.get("reload_scan_results_path_input")
@@ -1520,6 +1564,7 @@ def load_previous_scan_btn(_button):
 
 
 def run_dry_run_with_file_btn(_button):
+    """Run dry-run after applying the current template file path selection."""
     context = _ctx()
     dry_run_template_path_input = context.get("dry_run_template_path_input")
     if dry_run_template_path_input is None:
@@ -1531,6 +1576,7 @@ def run_dry_run_with_file_btn(_button):
 
 
 def preview_dry_run_match_btn(_button):
+    """Render a side-by-side preview for the first updatable dry-run row."""
     context = _ctx()
     dry_run_preview_output = context.get("dry_run_preview_output")
     if dry_run_preview_output is None:
@@ -1587,6 +1633,7 @@ def preview_dry_run_match_btn(_button):
     )
 
 def export_final_results_btn(_button):
+    """Export final update outcomes to one combined CSV with status labels."""
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
     final_results_path_input = context.get("final_results_path_input")
@@ -1621,6 +1668,7 @@ def export_final_results_btn(_button):
 
 
 def _build_combined_update_results(success_df, update_errors_df):
+    """Build a single status-labeled update-results table from success and error rows."""
     preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
 
     success_export = success_df.copy()
@@ -1656,6 +1704,14 @@ def _build_combined_update_results(success_df, update_errors_df):
 # =====================================================================
 
 def dry_run_btn(_button):
+    """Build the dry-run plan, display a summary, and refresh export controls.
+
+    PARAMS
+    _button: ipywidgets button event payload (unused)
+
+    RETURNS
+    None
+    """
     context = _ctx()
     dry_run_output = context.get("dry_run_output")
     if dry_run_output is None:
@@ -1791,6 +1847,7 @@ TRAILING_EMPTY_WRAPPER_RE = re.compile(
 )
 # If the canonical block is wrapped only by generic formatting junk, unwrap it and preserve the true surrounding content.
 def _build_around_canonical_junk_re(official_html: str):
+    """Build regex to trim wrapper-only junk around the canonical ToU block."""
     return re.compile(
         rf"""(?isx)
         (?P<before>
@@ -2211,6 +2268,14 @@ def build_side_by_side_report(
 # =====================================================================
 
 def apply_updates_btn(_button):
+    """Execute Step 6 update workflow using current plan and confirmation input.
+
+    PARAMS
+    _button: ipywidgets button event payload (unused)
+
+    RETURNS
+    None
+    """
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
