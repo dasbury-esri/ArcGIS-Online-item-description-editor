@@ -56,6 +56,7 @@ def detect_environment():
 current_env, env_string = detect_environment()
 
 OUTPUT_DIR_NAME = "notebook_outputs"
+CSV_TIMESTAMP_SUFFIX_RE = re.compile(r"_\d{8}_\d{4}$")
 
 
 def _default_output_root():
@@ -92,15 +93,36 @@ def default_output_dir_str():
 
 def default_output_path_str(filename):
     """Return an absolute output path for a filename under the output directory."""
-    return str((get_output_dir() / filename).resolve())
+    output_path = (get_output_dir() / filename).resolve()
+    if output_path.suffix.lower() == ".csv":
+        output_path = with_csv_timestamp(output_path)
+    return str(output_path)
 
 
-def resolve_output_path(filename_or_path, default_filename):
+def with_csv_timestamp(path_obj):
+    """Return a CSV path with filename pattern base_YYYYMMDD_HHMM.csv.
+
+    If the base filename already ends with a timestamp suffix, replace it with the current timestamp.
+    """
+    path_obj = Path(path_obj)
+    if path_obj.suffix.lower() != ".csv":
+        return path_obj
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    stem = path_obj.stem
+    if CSV_TIMESTAMP_SUFFIX_RE.search(stem):
+        stem = CSV_TIMESTAMP_SUFFIX_RE.sub("", stem)
+    return path_obj.with_name(f"{stem}_{timestamp}.csv")
+
+
+def resolve_output_path(filename_or_path, default_filename, timestamp_csv=False):
     """Resolve a writable output path and ensure its parent directory exists."""
     raw_value = str(filename_or_path or "").strip()
     target_path = Path(raw_value if raw_value else default_filename).expanduser()
     if not target_path.is_absolute():
         target_path = get_output_dir() / target_path
+    if timestamp_csv:
+        target_path = with_csv_timestamp(target_path)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     return target_path.resolve()
 
@@ -1313,6 +1335,7 @@ def save_scan_outputs_btn(button):
     combined_path = resolve_output_path(
         scan_results_path_input.value,
         "scan_results.csv",
+        timestamp_csv=True,
     )
     combined_scan_df.to_csv(combined_path, index=False)
 
@@ -1414,7 +1437,7 @@ def export_dry_run_btn(_button):
     if not csv_name.lower().endswith(".csv"):
         csv_name = f"{csv_name}.csv"
 
-    csv_path = resolve_output_path(csv_name, "dry_run_results.csv")
+    csv_path = resolve_output_path(csv_name, "dry_run_results.csv", timestamp_csv=True)
     plan_df.to_csv(csv_path, index=False)
     dry_run_export_output.append_stdout(f"Saved file: {csv_path}\n")
 
@@ -1641,6 +1664,7 @@ def export_final_results_btn(_button):
     combined_path = resolve_output_path(
         final_results_path_input.value,
         "update_results.csv",
+        timestamp_csv=True,
     )
     combined_results_df.to_csv(combined_path, index=False)
 
@@ -2206,7 +2230,10 @@ def build_side_by_side_report(
                 function downloadSelectedIdsCsv() {{
                     const selected = getSelectedIds();
                     const csv = ['item_id', ...selected].join('\\n');
-                    triggerDownload('selected_item_ids.csv', csv, 'text/csv;charset=utf-8');
+                    const now = new Date();
+                    const pad = (value) => String(value).padStart(2, '0');
+                    const ts = String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate()) + '_' + pad(now.getHours()) + pad(now.getMinutes());
+                    triggerDownload('selected_item_ids_' + ts + '.csv', csv, 'text/csv;charset=utf-8');
                 }}
 
                 toggleAllEl.addEventListener('change', () => {{
@@ -2326,7 +2353,7 @@ def apply_updates_btn(_button):
     context["rollback_snapshot_df"] = rollback_snapshot_df
 
     if rollback_snapshot_df is not None and not rollback_snapshot_df.empty:
-        snapshot_path = resolve_output_path("rollback_snapshot.csv", "rollback_snapshot.csv")
+        snapshot_path = resolve_output_path("rollback_snapshot.csv", "rollback_snapshot.csv", timestamp_csv=True)
         rollback_snapshot_df.to_csv(snapshot_path, index=False)
         context["rollback_snapshot_path"] = str(snapshot_path)
         with apply_edits_output:
@@ -2752,7 +2779,7 @@ def export_rollback_results_btn(_button):
         rollback_export_output.append_stdout("Nothing to export. Both rollback result tables are empty.\n")
         return
 
-    output_path = resolve_output_path(rollback_results_path_input.value, "rollback_results.csv")
+    output_path = resolve_output_path(rollback_results_path_input.value, "rollback_results.csv", timestamp_csv=True)
     combined_df.to_csv(output_path, index=False)
     rollback_export_output.append_stdout(
         f"Saved file: {output_path}\n"

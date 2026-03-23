@@ -29,3 +29,4 @@ Add optional rollback with targeted undo and validate both baseline and remediat
 ## Post-Batch Feature Additions
 
 - [x] F3-01 Report JSON download button turns green when one or more report row checkboxes are selected and returns to gray when none are selected.
+- [x] F3-02 Timestamp all CSV outputs using filename_YYYYMMDD_HHMM.csv format.
