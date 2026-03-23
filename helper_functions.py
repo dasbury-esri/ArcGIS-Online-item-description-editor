@@ -1196,6 +1196,74 @@ def scan_org_licenseinfo_without_10k_cap(
 # File handling
 # =====================================================================
 
+def refresh_scan_save_ui():
+    context = _ctx()
+    save_scan_container = context.get("save_scan_container")
+    save_scan_output = context.get("save_scan_output")
+    scan_results_path_input = context.get("scan_results_path_input")
+    save_scan_button = context.get("save_scan_button")
+    save_scan_status = context.get("save_scan_status")
+    if save_scan_container is None:
+        raise RuntimeError("context['save_scan_container'] is not configured.")
+
+    matches_df = context.get("matches_df")
+    errors_df = context.get("errors_df")
+    all_items_df = context.get("all_items_df")
+
+    if matches_df is None and errors_df is None and all_items_df is None:
+        save_scan_container.children = ()
+        return
+
+    has_any_rows = False
+    if matches_df is not None and not matches_df.empty:
+        has_any_rows = True
+    if errors_df is not None and not errors_df.empty:
+        has_any_rows = True
+    if all_items_df is not None and not all_items_df.empty:
+        has_any_rows = True
+
+    children = [widgets.HTML(value="<div style='margin-top:12px; font-weight:600;'>Optional: Save combined scan outputs to save time in a future run.</div>")]
+    if has_any_rows and scan_results_path_input is not None and save_scan_button is not None and save_scan_status is not None:
+        children.append(scan_results_path_input)
+        children.append(widgets.HBox([save_scan_button, save_scan_status]))
+    else:
+        children.append(
+            widgets.HTML(
+                value="<div style='margin:0; padding:0;'>No non-empty scan output rows are available to export yet.</div>"
+            )
+        )
+
+    if save_scan_output is not None:
+        children.append(save_scan_output)
+    save_scan_container.children = tuple(children)
+
+
+def refresh_dry_run_export_ui():
+    context = _ctx()
+    dry_run_export_container = context.get("dry_run_export_container")
+    dry_run_export_path_input = context.get("dry_run_export_path_input")
+    dry_run_export_button = context.get("dry_run_export_button")
+    dry_run_export_status = context.get("dry_run_export_status")
+    dry_run_export_output = context.get("dry_run_export_output")
+    if dry_run_export_container is None:
+        raise RuntimeError("context['dry_run_export_container'] is not configured.")
+
+    plan_df = context.get("plan_df")
+    if plan_df is None:
+        dry_run_export_container.children = ()
+        return
+
+    children = [
+        widgets.HTML(value="<div style='margin-top:12px; font-weight:600;'>Optional: Export current dry-run results</div>")
+    ]
+    if dry_run_export_path_input is not None:
+        children.append(dry_run_export_path_input)
+    if dry_run_export_button is not None and dry_run_export_status is not None:
+        children.append(widgets.HBox([dry_run_export_button, dry_run_export_status]))
+    if dry_run_export_output is not None:
+        children.append(dry_run_export_output)
+    dry_run_export_container.children = tuple(children)
+
 def save_scan_outputs_btn(button):
     context = _ctx()
     save_scan_output = context.get("save_scan_output")
