@@ -1471,8 +1471,10 @@ def preview_dry_run_match_btn(_button):
 def export_final_results_btn(_button):
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
-    edit_successes_path_input = context.get("edit_successes_path_input")
-    edit_errors_path_input = context.get("edit_errors_path_input")
+    final_results_path_input = context.get("final_results_path_input")
+    if final_results_path_input is None:
+        # Backward compatibility with earlier notebook wiring.
+        final_results_path_input = context.get("edit_successes_path_input")
     if export_final_results_output is None:
         raise RuntimeError("context['export_final_results_output'] is not configured.")
 
@@ -1483,39 +1485,56 @@ def export_final_results_btn(_button):
         export_final_results_output.append_stdout("Run Step 6 first to create the export data.\n")
         return
 
-    export_targets = []
-    skipped_targets = []
-
-    if not success_df.empty:
-        success_path = resolve_output_path(
-            edit_successes_path_input.value if edit_successes_path_input is not None else None,
-            "update_successes.csv",
-        )
-        export_targets.append(("Success CSV", success_df, success_path))
-    else:
-        skipped_targets.append("Success CSV")
-
-    if not update_errors_df.empty:
-        errors_path = resolve_output_path(
-            edit_errors_path_input.value if edit_errors_path_input is not None else None,
-            "update_errors.csv",
-        )
-        export_targets.append(("Errors CSV", update_errors_df, errors_path))
-    else:
-        skipped_targets.append("Errors CSV")
-
-    if not export_targets:
+    combined_results_df = _build_combined_update_results(success_df, update_errors_df)
+    if combined_results_df.empty:
         export_final_results_output.append_stdout("Nothing to export. Both final result tables are empty.\n")
         return
 
-    export_final_results_output.append_stdout("Saved files:\n")
-    for _label, dataframe, target_path in export_targets:
-        dataframe.to_csv(target_path, index=False)
-        export_final_results_output.append_stdout(f"- {target_path}\n")
+    combined_path = resolve_output_path(
+        final_results_path_input.value if final_results_path_input is not None else None,
+        "update_results.csv",
+    )
+    combined_results_df.to_csv(combined_path, index=False)
 
-    if skipped_targets:
-        for label in skipped_targets:
-            export_final_results_output.append_stdout(f"{_empty_output_message(label)}\n")
+    success_count = int((combined_results_df["status"] == "success").sum())
+    error_count = int((combined_results_df["status"] == "error").sum())
+    export_final_results_output.append_stdout(
+        f"Saved file: {combined_path}\n"
+        f"Rows exported: {len(combined_results_df)} "
+        f"({count_phrase(success_count, 'success')}, {count_phrase(error_count, 'error')})\n"
+    )
+
+
+def _build_combined_update_results(success_df, update_errors_df):
+    preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
+
+    success_export = success_df.copy()
+    if success_export.empty:
+        success_export = pd.DataFrame(columns=preferred_cols)
+    else:
+        for col in ("item_id", "title", "owner", "type"):
+            if col not in success_export.columns:
+                success_export[col] = ""
+        success_export["status"] = "success"
+        success_export["error"] = ""
+
+    error_export = update_errors_df.copy()
+    if error_export.empty:
+        error_export = pd.DataFrame(columns=preferred_cols)
+    else:
+        for col in ("item_id", "title", "owner", "type"):
+            if col not in error_export.columns:
+                error_export[col] = ""
+        if "error" not in error_export.columns:
+            error_export["error"] = ""
+        error_export["status"] = "error"
+
+    combined_results_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
+    if combined_results_df.empty:
+        return pd.DataFrame(columns=preferred_cols)
+
+    ordered_cols = preferred_cols + [c for c in combined_results_df.columns if c not in preferred_cols]
+    return combined_results_df[ordered_cols]
 
 # =====================================================================
 # Dry run functions
@@ -2304,6 +2323,8 @@ def apply_licenseinfo_updates(
             error_rows.append({
                 "item_id": item_id,
                 "title": getattr(row, "title", None),
+                "owner": getattr(row, "owner", None),
+                "type": getattr(row, "type", None),
                 "error": str(exc)
             })
 
