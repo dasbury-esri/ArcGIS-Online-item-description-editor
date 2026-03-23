@@ -54,4 +54,9 @@ ago_item_description_editor_outputs/
 .old_work/
 
 # GitHub/Copilot
-.github/
+# Ignore .github by default, but keep planning/tracking docs versioned.
+.github/*
+!.github/prompts/
+!.github/prompts/**
+!.github/burndown/
+!.github/burndown/**
