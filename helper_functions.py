@@ -1763,11 +1763,24 @@ def export_final_results_btn(_button):
     export_final_results_output.clear_output()
     success_df = context.get("success_df")
     update_errors_df = context.get("update_errors_df")
-    if success_df is None or update_errors_df is None:
-        export_final_results_output.append_stdout("Run Step 6 first to create the export data.\n")
+    rollback_success_df = context.get("rollback_success_df")
+    rollback_errors_df = context.get("rollback_errors_df")
+
+    if (
+        success_df is None
+        and update_errors_df is None
+        and rollback_success_df is None
+        and rollback_errors_df is None
+    ):
+        export_final_results_output.append_stdout("Run Step 6 and/or Step 7 first to create the export data.\n")
         return
 
-    combined_results_df = _build_combined_update_results(success_df, update_errors_df)
+    combined_results_df = _build_combined_final_results(
+        success_df,
+        update_errors_df,
+        rollback_success_df,
+        rollback_errors_df,
+    )
     if combined_results_df.empty:
         export_final_results_output.append_stdout("Nothing to export. Both final result tables are empty.\n")
         return
@@ -1793,6 +1806,43 @@ def export_final_results_btn(_button):
         f"{count_phrase(undone_count, 'undone item')}, "
         f"{count_phrase(error_count, 'error')})\n"
     )
+
+
+def _build_combined_final_results(success_df, update_errors_df, rollback_success_df, rollback_errors_df):
+    """Build a single final results table that includes both edit and undo outcomes."""
+    update_results_df = _build_combined_update_results(
+        success_df if success_df is not None else pd.DataFrame(),
+        update_errors_df if update_errors_df is not None else pd.DataFrame(),
+    )
+    rollback_results_df = _build_combined_rollback_results(
+        rollback_success_df if rollback_success_df is not None else pd.DataFrame(),
+        rollback_errors_df if rollback_errors_df is not None else pd.DataFrame(),
+    )
+
+    combined_results_df = pd.concat([update_results_df, rollback_results_df], ignore_index=True, sort=False)
+    if combined_results_df.empty:
+        return combined_results_df
+
+    preferred_cols = [
+        "item_id",
+        "title",
+        "owner",
+        "type",
+        "operation",
+        "operation_at_utc",
+        "result",
+        "result_at_utc",
+        "last_status",
+        "last_status_at_utc",
+        "error",
+        "error_at_utc",
+    ]
+    for col in preferred_cols:
+        if col not in combined_results_df.columns:
+            combined_results_df[col] = ""
+
+    ordered_cols = preferred_cols + [c for c in combined_results_df.columns if c not in preferred_cols]
+    return combined_results_df[ordered_cols]
 
 
 def _build_combined_update_results(success_df, update_errors_df):
@@ -2927,19 +2977,23 @@ def execute_rollback_btn(_button):
             if not ok:
                 raise RuntimeError("item.update returned False")
 
+            operation_timestamp_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             success_rows.append({
                 "item_id": item_id,
                 "title": getattr(row, "title", None),
                 "owner": getattr(row, "owner", None),
                 "type": getattr(row, "type", None),
+                "operation_timestamp_utc": operation_timestamp_utc,
             })
         except Exception as exc:
+            error_timestamp_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             error_rows.append({
                 "item_id": item_id,
                 "title": getattr(row, "title", None),
                 "owner": getattr(row, "owner", None),
                 "type": getattr(row, "type", None),
                 "error": str(exc),
+                "error_timestamp_utc": error_timestamp_utc,
             })
 
     rollback_success_df = pd.DataFrame(success_rows)
@@ -3028,9 +3082,13 @@ def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
         "owner",
         "type",
         "operation",
+        "operation_at_utc",
         "result",
+        "result_at_utc",
         "last_status",
+        "last_status_at_utc",
         "error",
+        "error_at_utc",
     ]
 
     success_export = rollback_success_df.copy()
@@ -3040,10 +3098,16 @@ def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
         for col in ("item_id", "title", "owner", "type"):
             if col not in success_export.columns:
                 success_export[col] = ""
-        success_export["operation"] = "reverted"
+        if "operation_timestamp_utc" not in success_export.columns:
+            success_export["operation_timestamp_utc"] = ""
+        success_export["operation"] = "undone"
+        success_export["operation_at_utc"] = success_export["operation_timestamp_utc"]
         success_export["result"] = "success"
-        success_export["last_status"] = "reverted - success"
+        success_export["result_at_utc"] = success_export["operation_timestamp_utc"]
+        success_export["last_status"] = "undone - success"
+        success_export["last_status_at_utc"] = success_export["operation_timestamp_utc"]
         success_export["error"] = ""
+        success_export["error_at_utc"] = ""
 
     error_export = rollback_errors_df.copy()
     if error_export.empty:
@@ -3054,9 +3118,15 @@ def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
                 error_export[col] = ""
         if "error" not in error_export.columns:
             error_export["error"] = ""
-        error_export["operation"] = "reverted"
+        if "error_timestamp_utc" not in error_export.columns:
+            error_export["error_timestamp_utc"] = ""
+        error_export["operation"] = "undone"
+        error_export["operation_at_utc"] = error_export["error_timestamp_utc"]
         error_export["result"] = "failure"
-        error_export["last_status"] = "reverted - failure"
+        error_export["result_at_utc"] = error_export["error_timestamp_utc"]
+        error_export["last_status"] = "undone - failure"
+        error_export["last_status_at_utc"] = error_export["error_timestamp_utc"]
+        error_export["error_at_utc"] = error_export["error_timestamp_utc"]
 
     combined_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
     if combined_df.empty:
