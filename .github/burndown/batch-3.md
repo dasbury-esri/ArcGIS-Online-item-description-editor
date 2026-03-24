@@ -17,14 +17,14 @@ Add optional rollback with targeted undo and validate both baseline and remediat
 - [x] Undo preview and confirmation prevent accidental rollback
 - [x] Apply and rollback both generate auditable success/error exports
 - [x] Pass A succeeds: scan -> dry run -> report -> apply -> export
-- [ ] Pass B succeeds: scan -> dry run -> report -> apply -> undo -> export
+- [x] Pass B succeeds: scan -> dry run -> report -> apply -> undo -> export
 
 ## Session Log
 
 - Date: 2026-03-23
 - Completed tickets: B3-01, B3-02, B3-03, B3-04
-- Blockers: Pass B end-to-end validation is still pending.
-- Next action: Run Pass B in notebook runtime against org content and capture output artifacts.
+- Blockers: None.
+- Next action: Batch 3 finalized.
 
 ## Post-Batch Feature Additions
 

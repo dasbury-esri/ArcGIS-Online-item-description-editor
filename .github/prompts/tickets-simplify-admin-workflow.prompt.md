@@ -32,10 +32,12 @@ Use this as the implementation queue for the simplification work. Complete Batch
 
 ### Batch 3 Status
 
-- [ ] B3-01 Add pre-edit snapshot capture for apply operations
-- [ ] B3-02 Add targeted rollback input mode (manual and file-based IDs)
-- [ ] B3-03 Add rollback preview, confirmation, and execution controls
-- [ ] B3-04 Add rollback audit exports and run dual end-to-end validation
+- [x] B3-01 Add pre-edit snapshot capture for apply operations
+- [x] B3-02 Add targeted rollback input mode (manual and file-based IDs)
+- [x] B3-03 Add rollback preview, confirmation, and execution controls
+- [x] B3-04 Add rollback audit exports and run dual end-to-end validation
+
+Batch 3 Finalized: Pass A and Pass B are both marked PASS.
 
 ## Batch 1: Semantic Rename and Admin Copy Baseline
 
