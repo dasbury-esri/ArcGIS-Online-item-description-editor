@@ -50,6 +50,25 @@ python scripts/generate_bootstrap_notebook.py
 
 This rebuilds `Bulk editor for ArcGIS Online Item Details pages.ipynb` from the current repo state.
 
+## Notebook Workspace Sync CLI
+
+Use `scripts/ago_sync_notebook.py` to work with ArcGIS notebook workspace files outside of the notebook UI.
+
+- Lists workspace files.
+- Resolves notebook workspace endpoints from org + item context.
+- Uploads and overwrites notebook files by filename.
+- Supports interactive prompts for org name, username, and notebook item ID when values are omitted.
+
+Examples:
+
+```bash
+python scripts/ago_sync_notebook.py
+python scripts/ago_sync_notebook.py list
+python scripts/ago_sync_notebook.py upload --local-file "Bulk editor for ArcGIS Online Item Details pages.ipynb" --remote-name "Bulk editor for ArcGIS Online Item Details pages.ipynb" --verify
+```
+
+When command arguments are incomplete (for example, missing the command while passing partial flags), the script prints full help text and then the specific error so operators can recover quickly.
+
 ## Notes
 
 - The source notebook expects `helper_functions.py` to be available in the runtime environment.

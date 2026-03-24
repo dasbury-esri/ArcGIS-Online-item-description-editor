@@ -28,6 +28,14 @@ except ImportError:  # Optional dependency for token generation.
 DEFAULT_SHORT_ORG = "www"
 DEFAULT_KEYRING_SERVICE = "arcgis-online"
 
+
+class HelpfulArgumentParser(argparse.ArgumentParser):
+	"""Argparse parser that shows full help text before parse errors."""
+
+	def error(self, message: str) -> None:
+		self.print_help(sys.stderr)
+		self.exit(2, f"\n{self.prog}: error: {message}\n")
+
 def prompt_for_auth_context(
 		default_short_org: str = DEFAULT_SHORT_ORG,
 		default_username: str = "",
@@ -275,7 +283,7 @@ def upload_file(
 
 
 def build_parser() -> argparse.ArgumentParser:
-	parser = argparse.ArgumentParser(
+	parser = HelpfulArgumentParser(
 		description=(
 			"List and upload notebook workspace files using ArcGIS data access API. "
 			"Default UX is interactive: run this script with no auth flags and it will "
@@ -397,6 +405,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
 	parser = build_parser()
+	if len(sys.argv) == 1:
+		parser.print_help()
+		return 0
 	args = parser.parse_args()
 
 	token = (args.token or "").strip()
