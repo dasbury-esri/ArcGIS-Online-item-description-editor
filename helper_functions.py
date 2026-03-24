@@ -1577,11 +1577,11 @@ def create_report_btn(_button):
     if not report_filename.lower().endswith(".html"):
         report_filename = f"{report_filename}.html"
 
-    selection_json_name = "selected_item_ids.json"
+    selection_json_name = "selected_item_ids.csv"
     if selection_json_name_input is not None and (selection_json_name_input.value or "").strip():
         selection_json_name = selection_json_name_input.value.strip()
-    if not selection_json_name.lower().endswith(".json"):
-        selection_json_name = f"{selection_json_name}.json"
+    if not selection_json_name.lower().endswith(".csv"):
+        selection_json_name = f"{selection_json_name}.csv"
 
     output_timestamp = _get_output_timestamp(context)
     selection_json_name = strip_timestamp_suffix(Path(selection_json_name).name).name
@@ -1598,7 +1598,7 @@ def create_report_btn(_button):
         report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html", timestamp_output=True)),
         only_updates=max_rows is None,
         gis=context.get("gis"),
-        selection_out_json=Path(selection_json_name).name,
+        selection_out_csv=Path(selection_json_name).name,
         output_timestamp=output_timestamp,
     )
     context["report_path"] = report_path
@@ -1618,7 +1618,7 @@ def create_report_btn(_button):
         create_report_output.append_stdout(
             "In ArcGIS Online, open the saved HTML report from the Files panel rather than from an output-cell button.\n"
         )
-    create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (JSON)'.\n")
+    create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (CSV)'.\n")
     create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 6.\n")
     create_report_output.append_stdout(
         f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n"
@@ -1753,7 +1753,7 @@ def preview_dry_run_match_btn(_button):
     )
 
 def export_final_results_btn(_button):
-    """Export final edit outcomes to a CSV with status labels."""
+    """Export final edit outcomes to a CSV with explicit operation/result labels."""
     context = _ctx()
     export_final_results_output = context.get("export_final_results_output")
     final_results_path_input = context.get("final_results_path_input")
@@ -1779,8 +1779,8 @@ def export_final_results_btn(_button):
     )
     combined_results_df.to_csv(combined_path, index=False)
 
-    success_count = int((combined_results_df["status"] == "success").sum())
-    error_count = int((combined_results_df["status"] == "error").sum())
+    success_count = int((combined_results_df["result"] == "success").sum())
+    error_count = int((combined_results_df["result"] == "error").sum())
     export_final_results_output.append_stdout(
         f"Saved file: {combined_path}\n"
         f"Rows exported: {len(combined_results_df)} "
@@ -1789,8 +1789,17 @@ def export_final_results_btn(_button):
 
 
 def _build_combined_update_results(success_df, update_errors_df):
-    """Build a status-labeled edit-results table from success and error rows."""
-    preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
+    """Build a single edit-results table with explicit operation/result columns."""
+    preferred_cols = [
+        "item_id",
+        "title",
+        "owner",
+        "type",
+        "operation",
+        "result",
+        "last_status",
+        "error",
+    ]
 
     success_export = success_df.copy()
     if success_export.empty:
@@ -1799,7 +1808,9 @@ def _build_combined_update_results(success_df, update_errors_df):
         for col in ("item_id", "title", "owner", "type"):
             if col not in success_export.columns:
                 success_export[col] = ""
-        success_export["status"] = "success"
+        success_export["operation"] = "edited"
+        success_export["result"] = "success"
+        success_export["last_status"] = "edited - success"
         success_export["error"] = ""
 
     error_export = update_errors_df.copy()
@@ -1811,7 +1822,9 @@ def _build_combined_update_results(success_df, update_errors_df):
                 error_export[col] = ""
         if "error" not in error_export.columns:
             error_export["error"] = ""
-        error_export["status"] = "error"
+        error_export["operation"] = "edited"
+        error_export["result"] = "error"
+        error_export["last_status"] = "edited - error"
 
     combined_results_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
     if combined_results_df.empty:
@@ -2097,7 +2110,7 @@ def build_side_by_side_report(
     report_output_path="dry_run_report.html",
     only_updates=True,
     gis=None,
-    selection_out_json="selected_item_ids.json",
+    selection_out_csv="selected_item_ids.csv",
     output_timestamp=None,
 ):
         """Build a HTML report to visualize old vs new ToU side-by-side for review before actual updates.
@@ -2107,7 +2120,7 @@ def build_side_by_side_report(
         report_output_path: filename for the output HTML report (default "dry_run_report.html")
         only_updates: if True, include only rows where will_update is True (default True)
         gis: optional authenticated GIS object, used to fetch thumbnails as data URIs for inlining; if not provided, thumbnail URLs will be constructed but may not display if authentication is required
-        selection_out_json: filename for the output JSON file that will contain the list of selected item IDs
+        selection_out_csv: filename for the output CSV file that will contain the list of selected item IDs
         output_timestamp: shared timestamp string in YYYYMMDD_HHMM format used for downloadable filenames
 
         RETURNS
@@ -2207,8 +2220,8 @@ def build_side_by_side_report(
                 details {{ margin-top: 6px; }}
                 .actions {{ display: flex; gap: 8px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }}
                 .actions button {{ padding: 6px 10px; border: 1px solid #ccc; background: #f7f7f7; border-radius: 4px; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }}
-                #downloadJsonBtn {{ background: #f7f7f7; border-color: #ccc; color: #222; }}
-                #downloadJsonBtn.ready {{ background: #2f9e44; border-color: #2f9e44; color: #fff; }}
+                #downloadCsvBtn {{ background: #f7f7f7; border-color: #ccc; color: #222; }}
+                #downloadCsvBtn.ready {{ background: #2f9e44; border-color: #2f9e44; color: #fff; }}
                 .wrap {{ overflow: auto; max-height: calc(100vh - 180px); border: 1px solid #ddd; }}
                 @media (max-width: 1400px) {{
                     .meta-inner {{ display: block; min-height: 0; }}
@@ -2221,8 +2234,7 @@ def build_side_by_side_report(
             <h1>LicenseInfo Side-by-Side Review</h1>
             <div class="note">Generated: {escape(ts)} | {escape(count_phrase(len(df), 'row'))}</div>
             <div class="actions">
-                <button type="button" id="downloadJsonBtn" onclick="downloadSelectedIdsJson()">Download selected Item IDs (JSON): Upload to Notebook to use</button>
-                <button type="button" onclick="downloadSelectedIdsCsv()">Download selected Item IDs (CSV): For review/archive</button>
+                <button type="button" id="downloadCsvBtn" onclick="downloadSelectedIdsCsv()">Download selected Item IDs (CSV): Upload to Notebook to use</button>
                 <span id="selectedCount">Selected: 0 items</span>
             </div>
             <div class="actions">
@@ -2258,7 +2270,7 @@ def build_side_by_side_report(
                 const CHECK_CLASS = '.row-check';
                 const toggleAllEl = document.getElementById('toggleAll');
                 const countEl = document.getElementById('selectedCount');
-                const jsonDownloadBtn = document.getElementById('downloadJsonBtn');
+                const csvDownloadBtn = document.getElementById('downloadCsvBtn');
                 const filterEl = document.getElementById('filterInput');
                 const rowsPerPageEl = document.getElementById('rowsPerPage');
                 const prevPageBtn = document.getElementById('prevPageBtn');
@@ -2303,8 +2315,8 @@ def build_side_by_side_report(
                 function updateSelectedCount() {{
                     const selected = getSelectedIds();
                     countEl.textContent = 'Selected: ' + selected.length + ' ' + (selected.length === 1 ? 'item' : 'items');
-                    if (jsonDownloadBtn) {{
-                        jsonDownloadBtn.classList.toggle('ready', selected.length > 0);
+                    if (csvDownloadBtn) {{
+                        csvDownloadBtn.classList.toggle('ready', selected.length > 0);
                     }}
                 }}
 
@@ -2343,15 +2355,16 @@ def build_side_by_side_report(
                     return stem + '_' + ts + ext;
                 }}
 
-                function downloadSelectedIdsJson() {{
-                    const selected = getSelectedIds();
-                    triggerDownload(timestampedFilename('{escape(selection_out_json)}'), JSON.stringify(selected, null, 2), 'application/json');
-                }}
-
                 function downloadSelectedIdsCsv() {{
                     const selected = getSelectedIds();
                     const csv = ['item_id', ...selected].join('\\n');
-                    triggerDownload(timestampedFilename('{escape(Path(selection_out_json).with_suffix(".csv").name)}'), csv, 'text/csv;charset=utf-8');
+                    triggerDownload(timestampedFilename('{escape(selection_out_csv)}'), csv, 'text/csv;charset=utf-8');
+                }}
+
+                // Hidden compatibility path for advanced users who still need JSON.
+                function downloadSelectedIdsJson() {{
+                    const selected = getSelectedIds();
+                    triggerDownload(timestampedFilename('{escape(Path(selection_out_csv).with_suffix(".json").name)}'), JSON.stringify(selected, null, 2), 'application/json');
                 }}
 
                 toggleAllEl.addEventListener('change', () => {{
@@ -2405,7 +2418,7 @@ def apply_updates_btn(_button):
     undo_snapshot_path_input = context.get("undo_snapshot_path_input")
     apply_edits_confirmation_input = context.get("apply_edits_confirmation_input")
     if apply_edits_output is None or selected_ids_to_edit_path_input is None:
-        raise RuntimeError("Filename.json and path must be configured before running the edit.")
+        raise RuntimeError("Selection file path must be configured before running the edit.")
 
     apply_edits_output.clear_output()
     if context.get("gis") is None:
@@ -2427,24 +2440,18 @@ def apply_updates_btn(_button):
     # load the selection file on demand before executing edits.
     if selected_item_ids is None:
         requested_path = str(selected_ids_to_edit_path_input.value or "").strip()
-        selected_path = resolve_existing_input_path(requested_path)
+        selected_item_ids, loaded_path, load_error = _load_item_ids_from_file(requested_path)
+        selected_path = Path(loaded_path) if loaded_path else None
         if selected_path is not None:
-            try:
-                if selected_path.suffix.lower() == ".json":
-                    selected_item_ids = json.loads(selected_path.read_text(encoding="utf-8"))
-                elif selected_path.suffix.lower() == ".csv":
-                    selected_df = pd.read_csv(selected_path, dtype=str)
-                    if "item_id" in selected_df.columns:
-                        selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
-                if selected_item_ids is not None:
-                    messages.append(
-                        f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
-                        f"from {selected_path}"
-                    )
-            except Exception as exc:
+            if load_error:
                 with apply_edits_output:
-                    print(f"Could not load selected IDs file ({selected_path}): {exc}")
+                    print(load_error)
                 return {"status": "failure", "message": "Selected IDs file could not be read."}
+
+            messages.append(
+                f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
+                f"from {selected_path}"
+            )
         else:
             if requested_path:
                 with apply_edits_output:
@@ -2527,25 +2534,18 @@ def load_update_selection_btn(_button):
     messages = []
     selected_item_ids = None
     requested_path = str(selected_ids_to_edit_path_input.value or "").strip()
-    selected_path = resolve_existing_input_path(requested_path)
+    selected_item_ids, loaded_path, load_error = _load_item_ids_from_file(requested_path)
+    selected_path = Path(loaded_path) if loaded_path else None
     if selected_path is not None:
-        try:
-            if selected_path.suffix.lower() == ".json":
-                selected_item_ids = json.loads(selected_path.read_text(encoding="utf-8"))
-            elif selected_path.suffix.lower() == ".csv":
-                selected_df = pd.read_csv(selected_path, dtype=str)
-                if "item_id" in selected_df.columns:
-                    selected_item_ids = selected_df["item_id"].dropna().astype(str).tolist()
-
-            if selected_item_ids is not None:
-                messages.append(
-                    f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
-                    f"from {selected_path}"
-                )
-        except Exception as exc:
+        if load_error:
             with apply_edits_output:
-                print(f"Could not load selected IDs file ({selected_path}): {exc}")
+                print(load_error)
             return {"status": "failure", "message": "Selected IDs file could not be read."}
+
+        messages.append(
+            f"Loaded {count_phrase(len(selected_item_ids), 'item ID', 'item IDs')} "
+            f"from {selected_path}"
+        )
     else:
         if requested_path:
             with apply_edits_output:
@@ -2700,7 +2700,7 @@ def parse_item_ids_text(raw_text):
 
 
 def _load_item_ids_from_file(path_value):
-    """Load item IDs from JSON or CSV file and return a list of string IDs."""
+    """Load item IDs from CSV (preferred) or JSON (compatibility) and return string IDs."""
     input_path = resolve_existing_input_path(path_value)
     if input_path is None:
         return [], None, "No ID file was found; continuing with manual IDs only."
@@ -2957,7 +2957,7 @@ def refresh_rollback_export_ui():
 
 
 def export_rollback_results_btn(_button):
-    """Export rollback execution results to a CSV with status labels."""
+    """Export rollback execution results to a CSV with explicit operation/result labels."""
     context = _ctx()
     rollback_export_output = context.get("rollback_export_output")
     rollback_results_path_input = context.get("rollback_results_path_input")
@@ -2981,14 +2981,23 @@ def export_rollback_results_btn(_button):
     rollback_export_output.append_stdout(
         f"Saved file: {output_path}\n"
         f"Rows exported: {len(combined_df)} ("
-        f"{count_phrase(int((combined_df['status'] == 'rollback_success').sum()), 'success')}, "
-        f"{count_phrase(int((combined_df['status'] == 'rollback_error').sum()), 'error')})\n"
+        f"{count_phrase(int((combined_df['result'] == 'success').sum()), 'success')}, "
+        f"{count_phrase(int((combined_df['result'] == 'failure').sum()), 'failure')})\n"
     )
 
 
 def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
-    """Build a single status-labeled rollback-results table from success and error rows."""
-    preferred_cols = ["item_id", "title", "owner", "type", "status", "error"]
+    """Build a single rollback-results table with explicit operation/result columns."""
+    preferred_cols = [
+        "item_id",
+        "title",
+        "owner",
+        "type",
+        "operation",
+        "result",
+        "last_status",
+        "error",
+    ]
 
     success_export = rollback_success_df.copy()
     if success_export.empty:
@@ -2997,7 +3006,9 @@ def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
         for col in ("item_id", "title", "owner", "type"):
             if col not in success_export.columns:
                 success_export[col] = ""
-        success_export["status"] = "rollback_success"
+        success_export["operation"] = "reverted"
+        success_export["result"] = "success"
+        success_export["last_status"] = "reverted - success"
         success_export["error"] = ""
 
     error_export = rollback_errors_df.copy()
@@ -3009,7 +3020,9 @@ def _build_combined_rollback_results(rollback_success_df, rollback_errors_df):
                 error_export[col] = ""
         if "error" not in error_export.columns:
             error_export["error"] = ""
-        error_export["status"] = "rollback_error"
+        error_export["operation"] = "reverted"
+        error_export["result"] = "failure"
+        error_export["last_status"] = "reverted - failure"
 
     combined_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
     if combined_df.empty:

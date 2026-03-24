@@ -35,8 +35,8 @@ Placeholder link:
 2. Scan content for target strings or HTML.
 3. Save or reload scan results.
 4. Do a dry-run to build and export a HTML review page.
-5. Review the HTML comparison report. After checking the items you want to edit, export those items as JSON.
-6. Import the JSON file back to the notebook.
+5. Review the HTML comparison report. After checking the items you want to edit, export those items as CSV.
+6. Import the CSV file back to the notebook.
 7. Apply updates only after explicit confirmation.
 8. Export final success and error results.
 
@@ -56,3 +56,8 @@ This rebuilds `Bulk editor for ArcGIS Online Item Details pages.ipynb` from the 
 - The portable notebook writes its bundled assets into the runtime automatically during Step 1.
 - The workflow defaults to a dedicated output folder so generated files are easier to find.
 - Review the dry-run output and report before applying any updates.
+
+## Developer Notes
+
+- The report UI is intentionally CSV-first for operators.
+- Hidden compatibility remains for JSON ID files in code paths used by Step 6 and rollback utilities; keep this behavior unless there is an explicit migration decision to remove JSON parsing entirely.
