@@ -141,6 +141,39 @@ def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
         cell["source"] = "".join(normalized_lines)
 
 
+def _normalize_code_cell_sources(cells: list[dict]) -> None:
+    """Serialize code cell sources with explicit newlines.
+
+    Some notebook runtimes concatenate list-based `source` entries directly.
+    Normalizing to a single string with trailing newlines prevents accidental
+    line merges (for example, comments and imports being combined).
+    """
+    for cell in cells:
+        if cell.get("cell_type") != "code":
+            continue
+
+        source = cell.get("source", [])
+        if isinstance(source, str):
+            text = source
+            if text and not text.endswith("\n"):
+                text = f"{text}\n"
+            elif not text:
+                text = "\n"
+            cell["source"] = text
+            continue
+
+        normalized_lines: list[str] = []
+        for entry in source:
+            text = str(entry)
+            if text.endswith("\n"):
+                normalized_lines.append(text)
+            elif text == "":
+                normalized_lines.append("\n")
+            else:
+                normalized_lines.append(f"{text}\n")
+        cell["source"] = "".join(normalized_lines)
+
+
 def _apply_portable_code_cell_metadata(cells: list[dict]) -> None:
     """Set code cell metadata expected by ArcGIS Online portable notebooks."""
     for cell in cells:
@@ -193,6 +226,7 @@ def build_portable_notebook(source_notebook: Path, output_notebook: Path) -> Pat
 
     _update_setup_cell(cells, helper_source, tou_source)
     _apply_portable_code_cell_metadata(cells)
+    _normalize_code_cell_sources(cells)
     _normalize_markdown_cell_sources(source_reference_cells)
     _normalize_markdown_cell_sources(cells)
     _validate_markdown_parity(source_reference_cells, cells)
