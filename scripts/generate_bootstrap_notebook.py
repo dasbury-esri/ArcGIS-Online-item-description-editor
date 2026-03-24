@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import json
 import re
 from pathlib import Path
@@ -80,51 +81,32 @@ def _build_bootstrap_lines(helper_source: str, tou_source: str) -> list[str]:
     return lines
 
 
-def _update_intro_markdown(cells: list[dict]) -> None:
-    cells[0]["source"] = ["# Bulk editor for ArcGIS Online Item Details pages"]
-    cells[1]["source"] = [
-        "**Welcome!**  ",
-        "",
-        "This notebook helps you scan, review, and update ArcGIS Online items at scale. It focuses on the Terms of Use section, stored in the `licenseInfo` field, and looks for text or HTML that you may want to replace.",
-        "",
-        "This version bundles `helper_functions.py` and `Esri_ToU.html` template directly into the notebook, so when running Step 1 those files will be expanded into a new folder and saved into `/arcgis/home/notebook_outputs`. You will be able to modify both input and output files as you progress. A review webpage is produced that lets you see what will change before you make any edits, and you can selectively choose to edit items from the report.",
-        "",
-        "*** BE CAUTIOUS WITH ANY TOOL LIKE THIS THAT BULK EDITS ITEMS *** However, you will have plenty of chances to review the work before commiting any changes.",
-        "",
-        "**Where this notebook can run**  ",
-        "- ArcGIS Online Notebook (JupyterLab-style).",
-        "- VS Code on macOS with a local Jupyter kernel.",
-        "- VS Code on Windows with a local Jupyter kernel.",
-        "",
-        "**How to use this notebook**  ",
-        " - Click on the text \"Setup and authenticate\" below. ",
-        " - There are two types of cells, Markdown (formatted notes) and Code.",
-        " - An indicator -- typically a vertical blue line -- should highlight that you have selected the \"Setup and authenticate\" Markdown cell.",
-        " - Once selected, click the \"Play\" button in the toolbar above to run the cell and advance to the next Code cell.",
-        " - Click the \"Play\" button a second time to run the code cell.",
-        " - After several seconds a \"Setup Notebook\" button should appear. Click the button to begin setup and authentication.",
-        " - After each cell completes, click the text within the following Markdown cell.",
-        " - Click the \"Play\" button to advance to the Code cell, then click the \"Play\" button a second time to make a button appear.",
-        " - Click the button to run the code in the cell. ",
-        "",
-        "**Notes**  ",
-        "- Organization-wide scans can take time, especially in large orgs, so progress messages are shown as users are processed.",
-        "- You can monitor the status of long running cells by viewing the small circle in the top right of the page.",
-        "- If you click on a code cell it will expand showing you the behind-the-scenes Python code.",
-        "- For a cleaner interface select View > Collapse All Code in the menu bar above to hide the code .",
-        "- If at any point you get stuck and want to start over, just click Kernel > Restart Kernel and Clear Outputs of All Cells... in the menu bar",
-        "- The workflow is designed to be safe by default: review first, then update.",
-    ]
-    cells[4]["source"] = [
-        "## 1. Setup and authenticate",
-        "Write the bundled helper files into the runtime, then initialize the notebook environment and connect to ArcGIS Online.",
-    ]
+def _find_setup_code_cell_index(cells: list[dict]) -> int:
+    """Locate the setup code cell immediately after the setup markdown heading."""
+    for idx, cell in enumerate(cells):
+        if cell.get("cell_type") != "markdown":
+            continue
+
+        source = cell.get("source", [])
+        source_text = "".join(source) if isinstance(source, list) else str(source)
+        if "## 1. Setup and authenticate" not in source_text:
+            continue
+
+        for follow_idx in range(idx + 1, len(cells)):
+            if cells[follow_idx].get("cell_type") == "code":
+                return follow_idx
+        break
+
+    raise RuntimeError("Could not locate the setup code cell in the source notebook.")
 
 
 def _update_setup_cell(cells: list[dict], helper_source: str, tou_source: str) -> None:
-    setup_cell = cells[5]
+    setup_cell = cells[_find_setup_code_cell_index(cells)]
     existing_source = setup_cell["source"]
-    setup_cell["source"] = _build_bootstrap_lines(helper_source, tou_source) + existing_source
+    bootstrap_lines = _build_bootstrap_lines(helper_source, tou_source)
+    if existing_source[: len(bootstrap_lines)] == bootstrap_lines:
+        return
+    setup_cell["source"] = bootstrap_lines + existing_source
 
 
 def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
@@ -159,18 +141,44 @@ def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
         cell["source"] = normalized_lines
 
 
+def _validate_markdown_parity(source_cells: list[dict], portable_cells: list[dict]) -> None:
+    if len(source_cells) != len(portable_cells):
+        raise RuntimeError("Portable notebook cell count differs from source notebook.")
+
+    for idx, (source_cell, portable_cell) in enumerate(zip(source_cells, portable_cells), start=1):
+        source_type = source_cell.get("cell_type")
+        portable_type = portable_cell.get("cell_type")
+        if source_type != portable_type:
+            raise RuntimeError(
+                f"Portable notebook cell {idx} type differs from source notebook: "
+                f"{source_type!r} != {portable_type!r}"
+            )
+
+        if source_type != "markdown":
+            continue
+
+        if source_cell.get("source") != portable_cell.get("source"):
+            raise RuntimeError(
+                f"Portable notebook markdown cell {idx} differs from source notebook. "
+                "Source notebook must remain the source of truth."
+            )
+
+
 def build_portable_notebook(source_notebook: Path, output_notebook: Path) -> Path:
     notebook = _load_notebook(source_notebook)
     cells = notebook.get("cells", [])
-    if len(cells) < 6:
+    if len(cells) < 2:
         raise RuntimeError("Source notebook structure is not what the generator expects.")
+
+    source_reference_cells = copy.deepcopy(cells)
 
     helper_source = _prepare_helper_source(HELPER_FILE)
     tou_source = TOU_FILE.read_text(encoding="utf-8")
 
-    _update_intro_markdown(cells)
     _update_setup_cell(cells, helper_source, tou_source)
+    _normalize_markdown_cell_sources(source_reference_cells)
     _normalize_markdown_cell_sources(cells)
+    _validate_markdown_parity(source_reference_cells, cells)
 
     output_notebook.write_text(json.dumps(notebook, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
     return output_notebook
