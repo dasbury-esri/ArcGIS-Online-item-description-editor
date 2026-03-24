@@ -349,6 +349,69 @@ def display_dry_run_iframe_preview(
     output_widget.append_display_data(HTML(markup))
 
 
+def display_rollback_iframe_preview(
+    output_widget,
+    *,
+    current_html,
+    rollback_html,
+    item_id="",
+    item_title="",
+    item_owner="",
+    item_type="",
+    snapshot_path="",
+    preview_count=None,
+):
+    """Render a side-by-side rollback preview for the first selected row."""
+    if output_widget is None:
+        raise RuntimeError("A notebook output widget is required for rollback preview rendering.")
+
+    current_iframe = _build_inline_html_iframe(current_html, height_px=320)
+    rollback_iframe = _build_inline_html_iframe(rollback_html, height_px=320)
+
+    info_rows = []
+    for label, value in [
+        ("Preview row", "First rollback target"),
+        ("Rows in rollback plan", preview_count),
+        ("Item", item_id),
+        ("Title", item_title),
+        ("Owner", item_owner),
+        ("Type", item_type),
+        ("Snapshot source", snapshot_path),
+    ]:
+        if value is not None and str(value).strip():
+            info_rows.append(f"<div><strong>{escape(label)}:</strong> {escape(str(value))}</div>")
+
+    markup = f"""
+    <div style="margin-top:12px; border:1px solid #d0d7de; border-radius:10px; background:#ffffff; overflow:hidden;">
+        <div style="padding:14px 16px; background:#f6f8fa; border-bottom:1px solid #d0d7de;">
+            <div style="font-weight:700; margin-bottom:6px;">Preview of the first rollback row</div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px 16px; font-size:13px; color:#374151;">
+                {''.join(info_rows)}
+            </div>
+        </div>
+        <div style="padding:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; align-items:start;">
+            <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
+                <div style="font-weight:600; margin-bottom:8px;">Current Terms of Use before rollback</div>
+                {current_iframe}
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer; font-weight:600;">Current source</summary>
+                    <pre style="margin-top:8px; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; background:#ffffff; border:1px solid #d0d7de; border-radius:6px; padding:10px;">{escape(current_html or '')}</pre>
+                </details>
+            </div>
+            <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
+                <div style="font-weight:600; margin-bottom:8px;">Terms of Use after rollback</div>
+                {rollback_iframe}
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer; font-weight:600;">Rollback source</summary>
+                    <pre style="margin-top:8px; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; background:#ffffff; border:1px solid #d0d7de; border-radius:6px; padding:10px;">{escape(rollback_html or '')}</pre>
+                </details>
+            </div>
+        </div>
+    </div>
+    """
+    output_widget.append_display_data(HTML(markup))
+
+
 def count_phrase(count, singular, plural=None):
     """Return a count + noun phrase with simple pluralization rules."""
     if count == 1:
@@ -454,7 +517,7 @@ def authenticate_gis(context, portal_url="https://www.arcgis.com", client_id=Non
 # ipywidgets Config
 # ======================================================================
 
-def initialize_ui(widget_type="text", description="", placeholder="", width="200px", height="40px", value=None, layout=None, elements=None):
+def initialize_ui(widget_type="text", description="", placeholder="", width="200px", height="40px", value=None, layout=None, elements=None, options=None):
     """
     Utility to create and return common ipywidgets for UI setup.
     """
@@ -482,6 +545,14 @@ def initialize_ui(widget_type="text", description="", placeholder="", width="200
             description=description, 
             layout=layout,
             style={"description_width": "initial"}
+        )
+    elif widget_type == "dropdown":
+        return widgets.Dropdown(
+            options=options if options is not None else (elements if elements is not None else []),
+            value=value,
+            description=description,
+            layout=layout,
+            style={"description_width": "initial"},
         )
     elif widget_type == "label":
         return widgets.Label(value=value if value is not None else "", layout=layout)
@@ -2331,6 +2402,7 @@ def apply_updates_btn(_button):
     context = _ctx()
     apply_edits_output = context.get("apply_edits_output")
     selected_ids_to_edit_path_input = context.get("selected_ids_to_edit_path_input")
+    undo_snapshot_path_input = context.get("undo_snapshot_path_input")
     apply_edits_confirmation_input = context.get("apply_edits_confirmation_input")
     if apply_edits_output is None or selected_ids_to_edit_path_input is None:
         raise RuntimeError("Filename.json and path must be configured before running the edit.")
@@ -2405,9 +2477,16 @@ def apply_updates_btn(_button):
     context["rollback_snapshot_df"] = rollback_snapshot_df
 
     if rollback_snapshot_df is not None and not rollback_snapshot_df.empty:
-        snapshot_path = resolve_output_path("rollback_snapshot.csv", "rollback_snapshot.csv", timestamp_csv=True)
+        snapshot_target = (
+            str(undo_snapshot_path_input.value or "").strip()
+            if undo_snapshot_path_input is not None
+            else "rollback_snapshot.csv"
+        )
+        snapshot_path = resolve_output_path(snapshot_target, "rollback_snapshot.csv", timestamp_csv=True)
         rollback_snapshot_df.to_csv(snapshot_path, index=False)
         context["rollback_snapshot_path"] = str(snapshot_path)
+        if undo_snapshot_path_input is not None:
+            undo_snapshot_path_input.value = str(snapshot_path)
         with apply_edits_output:
             print(f"Rollback snapshot saved: {snapshot_path}")
 
@@ -2630,16 +2709,32 @@ def _load_item_ids_from_file(path_value):
     suffix = input_path.suffix.lower()
     if suffix == ".json":
         payload = json.loads(input_path.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            loaded_ids = [str(x).strip() for x in payload if str(x).strip()]
+        if not isinstance(payload, list):
+            return [], str(input_path), "JSON ID file must contain a list of item ID strings."
+        loaded_ids = [str(x).strip() for x in payload if str(x).strip()]
     elif suffix == ".csv":
         loaded_df = pd.read_csv(input_path, dtype=str)
-        if "item_id" in loaded_df.columns:
-            loaded_ids = loaded_df["item_id"].dropna().astype(str).str.strip().tolist()
+        if "item_id" not in loaded_df.columns:
+            return [], str(input_path), "CSV ID file must contain an 'item_id' column."
+        loaded_ids = loaded_df["item_id"].dropna().astype(str).str.strip().tolist()
     else:
         return [], str(input_path), f"Unsupported ID file type: {input_path.suffix}. Use .json or .csv."
 
     return loaded_ids, str(input_path), None
+
+
+def refresh_rollback_target_mode_ui(_change=None):
+    """Enable only the rollback target input relevant to the selected mode."""
+    context = _ctx()
+    rollback_target_mode = context.get("rollback_target_mode")
+    rollback_ids_text_input = context.get("rollback_ids_text_input")
+    rollback_ids_file_path_input = context.get("rollback_ids_file_path_input")
+
+    mode = str(rollback_target_mode.value if rollback_target_mode is not None else "all").strip().lower()
+    if rollback_ids_text_input is not None:
+        rollback_ids_text_input.disabled = mode != "manual"
+    if rollback_ids_file_path_input is not None:
+        rollback_ids_file_path_input.disabled = mode != "file"
 
 
 def load_rollback_snapshot_btn(_button):
@@ -2663,6 +2758,9 @@ def load_rollback_snapshot_btn(_button):
         rollback_output.append_stdout(f"Snapshot file is missing required columns: {missing}\n")
         return
 
+    snapshot_df["item_id"] = snapshot_df["item_id"].fillna("").astype(str).str.strip()
+    snapshot_df = snapshot_df[snapshot_df["item_id"] != ""].copy()
+
     context["rollback_snapshot_df"] = snapshot_df
     context["rollback_snapshot_path"] = str(snapshot_path)
     rollback_output.append_stdout(f"Snapshot loaded: {count_phrase(len(snapshot_df), 'row')} from {snapshot_path}\n")
@@ -2672,6 +2770,7 @@ def preview_rollback_btn(_button):
     """Preview targeted rollback rows using manual and/or file-based item IDs."""
     context = _ctx()
     rollback_output = context.get("rollback_output")
+    rollback_target_mode = context.get("rollback_target_mode")
     rollback_ids_text_input = context.get("rollback_ids_text_input")
     rollback_ids_file_path_input = context.get("rollback_ids_file_path_input")
     if rollback_output is None:
@@ -2681,20 +2780,40 @@ def preview_rollback_btn(_button):
     snapshot_df = context.get("rollback_snapshot_df")
     if snapshot_df is None or snapshot_df.empty:
         rollback_output.append_stdout("No snapshot loaded. Load a snapshot before previewing rollback.\n")
-        return
+        return {"status": "warning", "message": "No snapshot loaded."}
 
-    manual_ids = parse_item_ids_text(rollback_ids_text_input.value if rollback_ids_text_input is not None else "")
-    file_ids, file_path_used, file_error = _load_item_ids_from_file(
-        rollback_ids_file_path_input.value if rollback_ids_file_path_input is not None else ""
-    )
-    if file_error:
-        rollback_output.append_stdout(f"{file_error}\n")
+    mode = str(rollback_target_mode.value if rollback_target_mode is not None else "all").strip().lower()
+    manual_ids = []
+    file_ids = []
+    file_path_used = None
+    file_error = None
+
+    if mode == "manual":
+        manual_ids = parse_item_ids_text(rollback_ids_text_input.value if rollback_ids_text_input is not None else "")
+        if not manual_ids:
+            rollback_output.append_stdout("No manual item IDs were provided. Enter one or more IDs before previewing rollback.\n")
+            return {"status": "warning", "message": "No manual IDs provided."}
+        rollback_output.append_stdout(f"Manual IDs loaded: {count_phrase(len(manual_ids), 'item ID', 'item IDs')}\n")
+    elif mode == "file":
+        file_ids, file_path_used, file_error = _load_item_ids_from_file(
+            rollback_ids_file_path_input.value if rollback_ids_file_path_input is not None else ""
+        )
+        if file_error:
+            rollback_output.append_stdout(f"{file_error}\n")
+            return {"status": "warning", "message": "Rollback ID file could not be used."}
+        if not file_ids:
+            rollback_output.append_stdout("The rollback ID file did not contain any usable item IDs.\n")
+            return {"status": "warning", "message": "No usable IDs in rollback file."}
+    elif mode != "all":
+        rollback_output.append_stdout(f"Unsupported rollback target mode: {mode}\n")
+        return {"status": "failure", "message": "Unsupported rollback mode."}
 
     targeted_ids = {str(x).strip() for x in (manual_ids + file_ids) if str(x).strip()}
 
     rollback_plan_df = snapshot_df.copy()
+    rollback_plan_df["item_id"] = rollback_plan_df["item_id"].fillna("").astype(str).str.strip()
     if targeted_ids:
-        rollback_plan_df = rollback_plan_df[rollback_plan_df["item_id"].astype(str).isin(targeted_ids)].copy()
+        rollback_plan_df = rollback_plan_df[rollback_plan_df["item_id"].isin(targeted_ids)].copy()
         rollback_output.append_stdout(
             f"Target filter applied: {count_phrase(len(rollback_plan_df), 'row')} selected for rollback.\n"
         )
@@ -2709,12 +2828,33 @@ def preview_rollback_btn(_button):
 
     if rollback_plan_df.empty:
         rollback_output.append_stdout("No rows matched the selected rollback targets.\n")
-        return
+        return {"status": "warning", "message": "No rollback rows matched."}
 
     rollback_output.append_stdout(f"Preview summary: {count_phrase(len(rollback_plan_df), 'row')} would be reverted.\n")
     preview_cols = [c for c in ["item_id", "title", "owner", "type"] if c in rollback_plan_df.columns]
     if preview_cols:
         rollback_output.append_display_data(rollback_plan_df[preview_cols].head(3))
+
+    first_row = rollback_plan_df.iloc[0]
+    current_html = first_row.get("applied_licenseInfo")
+    if current_html is None or not str(current_html).strip():
+        current_html = first_row.get("current_licenseInfo")
+    if current_html is None or not str(current_html).strip():
+        current_html = first_row.get("pre_edit_licenseInfo")
+
+    rollback_html = first_row.get("pre_edit_licenseInfo") or ""
+    display_rollback_iframe_preview(
+        rollback_output,
+        current_html=current_html or "",
+        rollback_html=rollback_html,
+        item_title=first_row.get("title") or "",
+        item_id=first_row.get("item_id") or "",
+        item_owner=first_row.get("owner") or "",
+        item_type=first_row.get("type") or "",
+        snapshot_path=context.get("rollback_snapshot_path") or "",
+        preview_count=len(rollback_plan_df),
+    )
+    return {"status": "success", "message": "Preview ready."}
 
 
 def execute_rollback_btn(_button):
@@ -2807,7 +2947,7 @@ def refresh_rollback_export_ui():
     else:
         children.append(
             widgets.HTML(
-                value="<div style='margin:0; padding:0;'>No rollback results are available to export yet.</div>"
+                value="<div style='margin:0; padding:0;'>No rollback execution results are available to export yet.</div>"
             )
         )
 
