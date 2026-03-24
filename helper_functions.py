@@ -1551,7 +1551,7 @@ def create_report_btn(_button):
     context = _ctx()
     create_report_output = context.get("create_report_output")
     report_path_input = context.get("report_path_input")
-    selection_json_name_input = context.get("selection_json_name_input")
+    selection_ids_filename_input = context.get("selection_ids_filename_input")
     report_limit_input = context.get("report_limit_input")
     if create_report_output is None:
         raise RuntimeError("context['create_report_output'] is not configured.")
@@ -1577,14 +1577,14 @@ def create_report_btn(_button):
     if not report_filename.lower().endswith(".html"):
         report_filename = f"{report_filename}.html"
 
-    selection_json_name = "selected_item_ids.csv"
-    if selection_json_name_input is not None and (selection_json_name_input.value or "").strip():
-        selection_json_name = selection_json_name_input.value.strip()
-    if not selection_json_name.lower().endswith(".csv"):
-        selection_json_name = f"{selection_json_name}.csv"
+    selection_ids_filename = "selected_item_ids.csv"
+    if selection_ids_filename_input is not None and (selection_ids_filename_input.value or "").strip():
+        selection_ids_filename = selection_ids_filename_input.value.strip()
+    if not selection_ids_filename.lower().endswith(".csv"):
+        selection_ids_filename = f"{selection_ids_filename}.csv"
 
     output_timestamp = _get_output_timestamp(context)
-    selection_json_name = strip_timestamp_suffix(Path(selection_json_name).name).name
+    selection_ids_filename = strip_timestamp_suffix(Path(selection_ids_filename).name).name
 
     plan_for_report = plan_df.copy()
     if max_rows is None:
@@ -1598,7 +1598,7 @@ def create_report_btn(_button):
         report_output_path=str(resolve_output_path(report_filename, "dry_run_report.html", timestamp_output=True)),
         only_updates=max_rows is None,
         gis=context.get("gis"),
-        selection_out_csv=Path(selection_json_name).name,
+        selection_out_csv=Path(selection_ids_filename).name,
         output_timestamp=output_timestamp,
     )
     context["report_path"] = report_path
@@ -1621,7 +1621,7 @@ def create_report_btn(_button):
     create_report_output.append_stdout("\nIn the report, choose rows with the checkboxes and click 'Download selected Item IDs (CSV)'.\n")
     create_report_output.append_stdout(f"Then upload or copy that file into /{OUTPUT_DIR_NAME} before running Step 6.\n")
     create_report_output.append_stdout(
-        f"When downloading item IDs from the report, the output file name will be: {Path(selection_json_name).name}\n"
+        f"When downloading item IDs from the report, the output file name will be: {Path(selection_ids_filename).name}\n"
     )
 
 def load_previous_scan_btn(_button):
@@ -2362,7 +2362,7 @@ def build_side_by_side_report(
                 }}
 
                 // Hidden compatibility path for advanced users who still need JSON.
-                function downloadSelectedIdsJson() {{
+                function downloadSelectedIdsJsonCompat() {{
                     const selected = getSelectedIds();
                     triggerDownload(timestampedFilename('{escape(Path(selection_out_csv).with_suffix(".json").name)}'), JSON.stringify(selected, null, 2), 'application/json');
                 }}
