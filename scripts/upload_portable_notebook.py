@@ -94,6 +94,16 @@ def get_item_metadata(item_id: str, token: str, timeout: int) -> Dict[str, Any]:
     return body
 
 
+def get_item_data(item_id: str, token: str, timeout: int) -> Dict[str, Any]:
+    url = f"https://www.arcgis.com/sharing/rest/content/items/{item_id}/data"
+    response = requests.get(url, params={"f": "pjson", "token": token}, timeout=timeout)
+    response.raise_for_status()
+    body: Dict[str, Any] = response.json()
+    if "error" in body:
+        raise RuntimeError(json.dumps(body["error"], indent=2))
+    return body
+
+
 def update_item_data(owner: str, item_id: str, token: str, local_file: Path, timeout: int) -> Dict[str, Any]:
     url = f"https://www.arcgis.com/sharing/rest/content/users/{owner}/items/{item_id}/update"
     form = {"f": "pjson", "token": token}
@@ -107,6 +117,41 @@ def update_item_data(owner: str, item_id: str, token: str, local_file: Path, tim
     if "error" in body:
         raise RuntimeError(json.dumps(body["error"], indent=2))
     return body
+
+
+def summarize_notebook_data(notebook_data: Dict[str, Any]) -> Dict[str, Any]:
+    cells = notebook_data.get("cells", [])
+    setup_cell = None
+    for cell in cells:
+        if cell.get("cell_type") != "code":
+            continue
+
+        source = cell.get("source", [])
+        source_lines = source if isinstance(source, list) else [source]
+        if any("Cell 1. Import packages" in str(line) for line in source_lines):
+            setup_cell = cell
+            break
+
+    if setup_cell is None:
+        return {
+            "cell_count": len(cells),
+            "setup_cell_found": False,
+        }
+
+    source = setup_cell.get("source", [])
+    lines = [str(line).rstrip("\n") for line in source] if isinstance(source, list) else str(source).splitlines()
+    return {
+        "cell_count": len(cells),
+        "setup_cell_found": True,
+        "setup_line_count": len(lines),
+        "setup_first_line": lines[0] if lines else "",
+        "setup_line_50": lines[49] if len(lines) >= 50 else "",
+        "contains_bootstrap_files": any("BOOTSTRAP_FILES" in line for line in lines),
+        "contains_find_helper_dir": any("def _find_helper_dir" in line for line in lines),
+        "contains_recreated_missing_asset": any(
+            "Recreated missing bundled asset" in line for line in lines
+        ),
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -165,7 +210,11 @@ def main() -> int:
     if not owner:
         raise RuntimeError("Item metadata did not include owner.")
 
+    local_notebook_data = json.loads(local_file.read_text(encoding="utf-8"))
+    local_summary = summarize_notebook_data(local_notebook_data)
     result = update_item_data(owner, item_id, token, local_file, args.timeout)
+    live_notebook_data = get_item_data(item_id, token, args.timeout)
+    live_summary = summarize_notebook_data(live_notebook_data)
 
     print(
         json.dumps(
@@ -175,6 +224,9 @@ def main() -> int:
                 "owner": owner,
                 "uploaded_file": str(local_file),
                 "update_result": result,
+                "local_notebook_summary": local_summary,
+                "live_notebook_summary": live_summary,
+                "live_matches_local_summary": live_summary == local_summary,
             },
             indent=2,
         )

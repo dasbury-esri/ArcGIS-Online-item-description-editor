@@ -1779,12 +1779,19 @@ def export_final_results_btn(_button):
     )
     combined_results_df.to_csv(combined_path, index=False)
 
-    success_count = int((combined_results_df["result"] == "success").sum())
-    error_count = int((combined_results_df["result"] == "error").sum())
+    edited_count = int(
+        ((combined_results_df["operation"] == "edited") & (combined_results_df["result"] == "success")).sum()
+    )
+    undone_count = int(
+        ((combined_results_df["operation"] == "undone") & (combined_results_df["result"] == "success")).sum()
+    )
+    error_count = int(combined_results_df["result"].isin(["error", "failure"]).sum())
     export_final_results_output.append_stdout(
         f"Saved file: {combined_path}\n"
-        f"Rows exported: {len(combined_results_df)} "
-        f"({count_phrase(success_count, 'success')}, {count_phrase(error_count, 'error')})\n"
+        f"Items processed: {len(combined_results_df)} "
+        f"({count_phrase(edited_count, 'edited item')}, "
+        f"{count_phrase(undone_count, 'undone item')}, "
+        f"{count_phrase(error_count, 'error')})\n"
     )
 
 
@@ -2503,15 +2510,16 @@ def apply_updates_btn(_button):
         snapshot_target = (
             str(undo_snapshot_path_input.value or "").strip()
             if undo_snapshot_path_input is not None
-            else "rollback_snapshot.csv"
+            else "undo_snapshot.csv"
         )
-        snapshot_path = resolve_output_path(snapshot_target, "rollback_snapshot.csv", timestamp_csv=True)
+        snapshot_path = resolve_output_path(snapshot_target, "undo_snapshot.csv", timestamp_csv=True)
         rollback_snapshot_df.to_csv(snapshot_path, index=False)
         context["rollback_snapshot_path"] = str(snapshot_path)
+        context["undo_snapshot_path"] = str(snapshot_path)
         if undo_snapshot_path_input is not None:
             undo_snapshot_path_input.value = str(snapshot_path)
         with apply_edits_output:
-            print(f"Rollback snapshot saved: {snapshot_path}")
+            print(f"Undo snapshot saved: {snapshot_path}")
 
     _invoke_context_callback(context, "refresh_rollback_export_ui")
     with apply_edits_output:
@@ -2574,7 +2582,10 @@ def load_update_selection_btn(_button):
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        messages.append(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit.")
+        if len(to_update) < initial_count:
+            messages.append(
+                f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit."
+            )
 
     context["selected_item_ids_for_update"] = selected_item_ids
     context["selected_item_ids_for_update_path"] = str(selected_path) if selected_path is not None else None
@@ -2619,11 +2630,13 @@ def apply_licenseinfo_updates(
     rollback_snapshot_df: DataFrame of pre-edit snapshots for rows that were successfully edited
     """
     to_update = plan_df[plan_df["will_update"] == True].copy()
+    initial_count = len(to_update)
 
     if selected_item_ids is not None:
         selected_set = {str(x) for x in selected_item_ids if str(x).strip()}
         to_update = to_update[to_update["item_id"].astype(str).isin(selected_set)].copy()
-        print(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit.")
+        if len(to_update) < initial_count:
+            print(f"You've selected a subset of the initial scan. {count_phrase(len(to_update), 'row')} selected for edit.")
 
     if to_update.empty:
         print("Nothing to edit.")
