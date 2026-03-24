@@ -141,6 +141,22 @@ def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
         cell["source"] = "".join(normalized_lines)
 
 
+def _apply_portable_code_cell_metadata(cells: list[dict]) -> None:
+    """Set code cell metadata expected by ArcGIS Online portable notebooks."""
+    for cell in cells:
+        if cell.get("cell_type") != "code":
+            continue
+
+        metadata = cell.setdefault("metadata", {})
+        metadata["trusted"] = False
+
+        jupyter_metadata = metadata.get("jupyter")
+        if not isinstance(jupyter_metadata, dict):
+            jupyter_metadata = {}
+            metadata["jupyter"] = jupyter_metadata
+        jupyter_metadata["source_hidden"] = True
+
+
 def _validate_markdown_parity(source_cells: list[dict], portable_cells: list[dict]) -> None:
     if len(source_cells) != len(portable_cells):
         raise RuntimeError("Portable notebook cell count differs from source notebook.")
@@ -176,6 +192,7 @@ def build_portable_notebook(source_notebook: Path, output_notebook: Path) -> Pat
     tou_source = TOU_FILE.read_text(encoding="utf-8")
 
     _update_setup_cell(cells, helper_source, tou_source)
+    _apply_portable_code_cell_metadata(cells)
     _normalize_markdown_cell_sources(source_reference_cells)
     _normalize_markdown_cell_sources(cells)
     _validate_markdown_parity(source_reference_cells, cells)
