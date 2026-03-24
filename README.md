@@ -22,6 +22,7 @@ Use the portable notebook when you want a single file that can be shared and run
 - `helper_functions.py`: shared helper functions used by the source notebook
 - `Esri_ToU.html`: canonical replacement HTML used by the dry-run and update steps
 - `scripts/generate_bootstrap_notebook.py`: generator script for rebuilding the portable notebook from the source files
+- `scripts/upload_portable_notebook.py`: small CLI utility to overwrite the ArcGIS Online notebook item with a local `.ipynb` file
 
 ## ArcGIS Online Notebook
 
@@ -50,24 +51,22 @@ python scripts/generate_bootstrap_notebook.py
 
 This rebuilds `Bulk editor for ArcGIS Online Item Details pages.ipynb` from the current repo state.
 
-## Notebook Workspace Sync CLI
+## Portable Notebook Upload CLI
 
-Use `scripts/ago_sync_notebook.py` to work with ArcGIS notebook workspace files outside of the notebook UI.
+Use `scripts/upload_portable_notebook.py` to overwrite the ArcGIS Online notebook item with a local portable `.ipynb` file.
 
-- Lists workspace files.
-- Resolves notebook workspace endpoints from org + item context.
-- Uploads and overwrites notebook files by filename.
-- Supports interactive prompts for org name, username, and notebook item ID when values are omitted.
+- Updates notebook item data via ArcGIS Sharing REST `update` endpoint.
+- Defaults to item ID `f3c7cf3d068e479f97e97fce818dea46`.
+- Defaults to local file `Bulk editor for ArcGIS Online Item Details pages.ipynb`.
+- Uses a provided token, or prompts for username and reads password from local keyring (with secure prompt fallback).
 
 Examples:
 
 ```bash
-python scripts/ago_sync_notebook.py
-python scripts/ago_sync_notebook.py list
-python scripts/ago_sync_notebook.py upload --local-file "Bulk editor for ArcGIS Online Item Details pages.ipynb" --remote-name "Bulk editor for ArcGIS Online Item Details pages.ipynb" --verify
+python scripts/upload_portable_notebook.py
+python scripts/upload_portable_notebook.py --item-id f3c7cf3d068e479f97e97fce818dea46 --file "Bulk editor for ArcGIS Online Item Details pages.ipynb"
+python scripts/upload_portable_notebook.py --token "<token>" --item-id f3c7cf3d068e479f97e97fce818dea46
 ```
-
-When command arguments are incomplete (for example, missing the command while passing partial flags), the script prints full help text and then the specific error so operators can recover quickly.
 
 ## Notes
 
