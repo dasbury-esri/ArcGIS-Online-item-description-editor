@@ -361,7 +361,7 @@ def display_rollback_iframe_preview(
     snapshot_path="",
     preview_count=None,
 ):
-    """Render a side-by-side rollback preview for the first selected row."""
+    """Render a side-by-side undo preview for the first selected row."""
     if output_widget is None:
         raise RuntimeError("A notebook output widget is required for rollback preview rendering.")
 
@@ -370,8 +370,8 @@ def display_rollback_iframe_preview(
 
     info_rows = []
     for label, value in [
-        ("Preview row", "First rollback target"),
-        ("Rows in rollback plan", preview_count),
+        ("Preview row", "First undo target"),
+        ("Rows in undo plan", preview_count),
         ("Item", item_id),
         ("Title", item_title),
         ("Owner", item_owner),
@@ -384,14 +384,14 @@ def display_rollback_iframe_preview(
     markup = f"""
     <div style="margin-top:12px; border:1px solid #d0d7de; border-radius:10px; background:#ffffff; overflow:hidden;">
         <div style="padding:14px 16px; background:#f6f8fa; border-bottom:1px solid #d0d7de;">
-            <div style="font-weight:700; margin-bottom:6px;">Preview of the first rollback row</div>
+            <div style="font-weight:700; margin-bottom:6px;">Preview of the first undo row</div>
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px 16px; font-size:13px; color:#374151;">
                 {''.join(info_rows)}
             </div>
         </div>
         <div style="padding:16px; display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; align-items:start;">
             <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
-                <div style="font-weight:600; margin-bottom:8px;">Current Terms of Use before rollback</div>
+                <div style="font-weight:600; margin-bottom:8px;">Current Terms of Use before undo</div>
                 {current_iframe}
                 <details style="margin-top:10px;">
                     <summary style="cursor:pointer; font-weight:600;">Current source</summary>
@@ -399,10 +399,10 @@ def display_rollback_iframe_preview(
                 </details>
             </div>
             <div style="border:1px solid #d0d7de; border-radius:8px; padding:12px; background:#fbfbfc;">
-                <div style="font-weight:600; margin-bottom:8px;">Terms of Use after rollback</div>
+                <div style="font-weight:600; margin-bottom:8px;">Terms of Use after undo</div>
                 {rollback_iframe}
                 <details style="margin-top:10px;">
-                    <summary style="cursor:pointer; font-weight:600;">Rollback source</summary>
+                    <summary style="cursor:pointer; font-weight:600;">Undo source</summary>
                     <pre style="margin-top:8px; white-space:pre-wrap; word-break:break-word; max-height:220px; overflow:auto; background:#ffffff; border:1px solid #d0d7de; border-radius:6px; padding:10px;">{escape(rollback_html or '')}</pre>
                 </details>
             </div>
@@ -1796,9 +1796,13 @@ def _build_combined_update_results(success_df, update_errors_df):
         "owner",
         "type",
         "operation",
+        "operation_at_utc",
         "result",
+        "result_at_utc",
         "last_status",
+        "last_status_at_utc",
         "error",
+        "error_at_utc",
     ]
 
     success_export = success_df.copy()
@@ -1808,10 +1812,16 @@ def _build_combined_update_results(success_df, update_errors_df):
         for col in ("item_id", "title", "owner", "type"):
             if col not in success_export.columns:
                 success_export[col] = ""
+        if "operation_timestamp_utc" not in success_export.columns:
+            success_export["operation_timestamp_utc"] = ""
         success_export["operation"] = "edited"
+        success_export["operation_at_utc"] = success_export["operation_timestamp_utc"]
         success_export["result"] = "success"
+        success_export["result_at_utc"] = success_export["operation_timestamp_utc"]
         success_export["last_status"] = "edited - success"
+        success_export["last_status_at_utc"] = success_export["operation_timestamp_utc"]
         success_export["error"] = ""
+        success_export["error_at_utc"] = ""
 
     error_export = update_errors_df.copy()
     if error_export.empty:
@@ -1822,9 +1832,15 @@ def _build_combined_update_results(success_df, update_errors_df):
                 error_export[col] = ""
         if "error" not in error_export.columns:
             error_export["error"] = ""
+        if "error_timestamp_utc" not in error_export.columns:
+            error_export["error_timestamp_utc"] = ""
         error_export["operation"] = "edited"
+        error_export["operation_at_utc"] = error_export["error_timestamp_utc"]
         error_export["result"] = "error"
+        error_export["result_at_utc"] = error_export["error_timestamp_utc"]
         error_export["last_status"] = "edited - error"
+        error_export["last_status_at_utc"] = error_export["error_timestamp_utc"]
+        error_export["error_at_utc"] = error_export["error_timestamp_utc"]
 
     combined_results_df = pd.concat([success_export, error_export], ignore_index=True, sort=False)
     if combined_results_df.empty:
@@ -2647,11 +2663,14 @@ def apply_licenseinfo_updates(
             if not ok:
                 raise RuntimeError("item.update returned False")
 
+            operation_timestamp_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
             success_rows.append({
                 "item_id": item_id,
                 "title": row.title,
                 "owner": row.owner,
-                "type": row.type
+                "type": row.type,
+                "operation_timestamp_utc": operation_timestamp_utc,
             })
 
             rollback_snapshot_rows.append({
@@ -2665,12 +2684,14 @@ def apply_licenseinfo_updates(
             })
 
         except Exception as exc:
+            error_timestamp_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             error_rows.append({
                 "item_id": item_id,
                 "title": getattr(row, "title", None),
                 "owner": getattr(row, "owner", None),
                 "type": getattr(row, "type", None),
-                "error": str(exc)
+                "error": str(exc),
+                "error_timestamp_utc": error_timestamp_utc,
             })
 
         if pause_seconds:
@@ -2779,7 +2800,7 @@ def preview_rollback_btn(_button):
     rollback_output.clear_output()
     snapshot_df = context.get("rollback_snapshot_df")
     if snapshot_df is None or snapshot_df.empty:
-        rollback_output.append_stdout("No snapshot loaded. Load a snapshot before previewing rollback.\n")
+        rollback_output.append_stdout("No snapshot loaded. Load a snapshot before previewing undo.\n")
         return {"status": "warning", "message": "No snapshot loaded."}
 
     mode = str(rollback_target_mode.value if rollback_target_mode is not None else "all").strip().lower()
@@ -2791,7 +2812,7 @@ def preview_rollback_btn(_button):
     if mode == "manual":
         manual_ids = parse_item_ids_text(rollback_ids_text_input.value if rollback_ids_text_input is not None else "")
         if not manual_ids:
-            rollback_output.append_stdout("No manual item IDs were provided. Enter one or more IDs before previewing rollback.\n")
+            rollback_output.append_stdout("No manual item IDs were provided. Enter one or more IDs before previewing undo.\n")
             return {"status": "warning", "message": "No manual IDs provided."}
         rollback_output.append_stdout(f"Manual IDs loaded: {count_phrase(len(manual_ids), 'item ID', 'item IDs')}\n")
     elif mode == "file":
@@ -2800,13 +2821,13 @@ def preview_rollback_btn(_button):
         )
         if file_error:
             rollback_output.append_stdout(f"{file_error}\n")
-            return {"status": "warning", "message": "Rollback ID file could not be used."}
+            return {"status": "warning", "message": "Undo ID file could not be used."}
         if not file_ids:
-            rollback_output.append_stdout("The rollback ID file did not contain any usable item IDs.\n")
-            return {"status": "warning", "message": "No usable IDs in rollback file."}
+            rollback_output.append_stdout("The undo ID file did not contain any usable item IDs.\n")
+            return {"status": "warning", "message": "No usable IDs in undo file."}
     elif mode != "all":
-        rollback_output.append_stdout(f"Unsupported rollback target mode: {mode}\n")
-        return {"status": "failure", "message": "Unsupported rollback mode."}
+        rollback_output.append_stdout(f"Unsupported undo target mode: {mode}\n")
+        return {"status": "failure", "message": "Unsupported undo mode."}
 
     targeted_ids = {str(x).strip() for x in (manual_ids + file_ids) if str(x).strip()}
 
@@ -2815,7 +2836,7 @@ def preview_rollback_btn(_button):
     if targeted_ids:
         rollback_plan_df = rollback_plan_df[rollback_plan_df["item_id"].isin(targeted_ids)].copy()
         rollback_output.append_stdout(
-            f"Target filter applied: {count_phrase(len(rollback_plan_df), 'row')} selected for rollback.\n"
+            f"Target filter applied: {count_phrase(len(rollback_plan_df), 'row')} selected for undo.\n"
         )
     else:
         rollback_output.append_stdout("No target IDs provided. Using all snapshot rows.\n")
@@ -2827,8 +2848,8 @@ def preview_rollback_btn(_button):
     context["rollback_target_item_ids"] = sorted(targeted_ids)
 
     if rollback_plan_df.empty:
-        rollback_output.append_stdout("No rows matched the selected rollback targets.\n")
-        return {"status": "warning", "message": "No rollback rows matched."}
+        rollback_output.append_stdout("No rows matched the selected undo targets.\n")
+        return {"status": "warning", "message": "No undo rows matched."}
 
     rollback_output.append_stdout(f"Preview summary: {count_phrase(len(rollback_plan_df), 'row')} would be reverted.\n")
     preview_cols = [c for c in ["item_id", "title", "owner", "type"] if c in rollback_plan_df.columns]
@@ -2872,12 +2893,12 @@ def execute_rollback_btn(_button):
 
     rollback_plan_df = context.get("rollback_plan_df")
     if rollback_plan_df is None or rollback_plan_df.empty:
-        rollback_output.append_stdout("No rollback plan loaded. Click Preview rollback first.\n")
+        rollback_output.append_stdout("No undo plan loaded. Click Preview card comparison first.\n")
         return
 
     phrase = str(rollback_confirmation_input.value if rollback_confirmation_input is not None else "").strip()
-    if phrase != "APPLY ROLLBACK":
-        rollback_output.append_stdout("Rollback canceled. Type APPLY ROLLBACK to execute rollback.\n")
+    if phrase != "APPLY UNDO":
+        rollback_output.append_stdout("Undo canceled. Type APPLY UNDO to execute undo.\n")
         return
 
     success_rows = []
@@ -2915,14 +2936,14 @@ def execute_rollback_btn(_button):
     _invoke_context_callback(context, "refresh_rollback_export_ui")
 
     rollback_output.append_stdout(
-        f"Rollback complete: {count_phrase(len(rollback_success_df), 'success')} | {count_phrase(len(rollback_errors_df), 'error')}\n"
+        f"Undo complete: {count_phrase(len(rollback_success_df), 'success')} | {count_phrase(len(rollback_errors_df), 'error')}\n"
     )
     if not rollback_success_df.empty:
         rollback_output.append_display_data(rollback_success_df.head(3))
 
 
 def refresh_rollback_export_ui():
-    """Refresh rollback export controls based on rollback execution results."""
+    """Refresh undo export controls based on undo execution results."""
     context = _ctx()
     rollback_export_container = context.get("rollback_export_container")
     rollback_results_path_input = context.get("rollback_results_path_input")
@@ -2947,7 +2968,7 @@ def refresh_rollback_export_ui():
     else:
         children.append(
             widgets.HTML(
-                value="<div style='margin:0; padding:0;'>No rollback execution results are available to export yet.</div>"
+                value="<div style='margin:0; padding:0;'>No undo execution results are available to export yet.</div>"
             )
         )
 
@@ -2957,18 +2978,18 @@ def refresh_rollback_export_ui():
 
 
 def export_rollback_results_btn(_button):
-    """Export rollback execution results to a CSV with explicit operation/result labels."""
+    """Export undo execution results to a CSV with explicit operation/result labels."""
     context = _ctx()
     rollback_export_output = context.get("rollback_export_output")
     rollback_results_path_input = context.get("rollback_results_path_input")
     if rollback_export_output is None or rollback_results_path_input is None:
-        raise RuntimeError("Rollback export controls are not fully configured.")
+        raise RuntimeError("Undo export controls are not fully configured.")
 
     rollback_export_output.clear_output()
     rollback_success_df = context.get("rollback_success_df")
     rollback_errors_df = context.get("rollback_errors_df")
     if rollback_success_df is None or rollback_errors_df is None:
-        rollback_export_output.append_stdout("Run rollback first to create export data.\n")
+        rollback_export_output.append_stdout("Run undo first to create export data.\n")
         return
 
     combined_df = _build_combined_rollback_results(rollback_success_df, rollback_errors_df)
