@@ -110,10 +110,10 @@ def _update_setup_cell(cells: list[dict], helper_source: str, tou_source: str) -
 
 
 def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
-    """Ensure markdown cells have explicit newlines between logical lines.
+    """Serialize markdown cell sources as single strings with explicit newlines.
 
-    ArcGIS notebook rendering can collapse list-of-string markdown sources when
-    lines are not newline-terminated.
+    ArcGIS Online notebooks handle markdown more reliably when `source` is a
+    single string rather than a list of string fragments.
     """
     for cell in cells:
         if cell.get("cell_type") != "markdown":
@@ -121,12 +121,12 @@ def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
 
         source = cell.get("source", [])
         if isinstance(source, str):
-            lines = source.splitlines(keepends=True)
-            if not lines:
-                lines = ["\n"]
-            elif not lines[-1].endswith("\n"):
-                lines[-1] = f"{lines[-1]}\n"
-            cell["source"] = lines
+            text = source
+            if text and not text.endswith("\n"):
+                text = f"{text}\n"
+            elif not text:
+                text = "\n"
+            cell["source"] = text
             continue
 
         normalized_lines: list[str] = []
@@ -138,7 +138,7 @@ def _normalize_markdown_cell_sources(cells: list[dict]) -> None:
                 normalized_lines.append("\n")
             else:
                 normalized_lines.append(f"{text}\n")
-        cell["source"] = normalized_lines
+        cell["source"] = "".join(normalized_lines)
 
 
 def _validate_markdown_parity(source_cells: list[dict], portable_cells: list[dict]) -> None:
